@@ -1,12 +1,13 @@
 import { axiosClient } from '@/lib/axios-client';
 import {
   LoginRequest,
-  LoginResponse,
+  AuthResponse,
   RegisterRequest,
   RegisterResponse,
   RefreshTokenRequest,
   RefreshTokenResponse,
   ApiResponse,
+  UserInfo,
 } from '@/types';
 
 /**
@@ -29,9 +30,10 @@ const AUTH_ENDPOINTS = {
 export const authService = {
   /**
    * Login user
+   * Backend return: { accessToken, refreshToken, userId, email, fullName, role }
    */
-  async login(data: LoginRequest): Promise<LoginResponse> {
-    const response = await axiosClient.post<ApiResponse<LoginResponse>>(
+  async login(data: LoginRequest): Promise<AuthResponse> {
+    const response = await axiosClient.post<ApiResponse<AuthResponse>>(
       AUTH_ENDPOINTS.LOGIN,
       data
     );
@@ -51,6 +53,8 @@ export const authService = {
 
   /**
    * Refresh access token
+   * Backend expects: { accessToken, refreshToken }
+   * Backend returns: { accessToken, refreshToken, expiresAt }
    */
   async refreshToken(data: RefreshTokenRequest): Promise<RefreshTokenResponse> {
     const response = await axiosClient.post<ApiResponse<RefreshTokenResponse>>(
@@ -69,9 +73,11 @@ export const authService = {
 
   /**
    * Get current user info
+   * Note: Với JWT decode, method này ít khi cần dùng
+   * Vì user info đã được extract từ accessToken
    */
-  async getCurrentUser() {
-    const response = await axiosClient.get<ApiResponse<any>>(AUTH_ENDPOINTS.ME);
+  async getCurrentUser(): Promise<UserInfo> {
+    const response = await axiosClient.get<ApiResponse<UserInfo>>(AUTH_ENDPOINTS.ME);
     return response.data.data!;
   },
 

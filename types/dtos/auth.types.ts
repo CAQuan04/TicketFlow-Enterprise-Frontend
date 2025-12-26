@@ -9,14 +9,29 @@ export interface LoginRequest {
   password: string;
 }
 
-export interface LoginResponse {
-  token: string;
+// AuthResponse được return từ Backend (cả login và register)
+export interface AuthResponse {
+  accessToken: string;  // Đổi từ 'token' thành 'accessToken' cho chuẩn
   refreshToken: string;
   userId: string;
   email: string;
   fullName: string;
   role: UserRole;
   expiresAt: string; // ISO DateTime từ .NET
+}
+
+// Legacy support (alias)
+export type LoginResponse = AuthResponse;
+
+// JWT Payload (được decode từ accessToken)
+export interface JwtPayload {
+  sub: string;          // User ID
+  email: string;
+  name: string;         // Full name
+  role: string;         // User role
+  exp: number;          // Expiration timestamp
+  iat: number;          // Issued at timestamp
+  jti: string;          // JWT ID
 }
 
 // Register Request/Response
@@ -44,19 +59,19 @@ export enum UserRole {
 
 // Token Refresh
 export interface RefreshTokenRequest {
-  token: string;
-  refreshToken: string;
+  accessToken: string;  // Current access token
+  refreshToken: string; // Current refresh token
 }
 
 export interface RefreshTokenResponse {
-  token: string;
-  refreshToken: string;
-  expiresAt: string;
+  accessToken: string;  // New access token
+  refreshToken: string; // New refresh token
+  expiresAt: string;    // New expiration time
 }
 
 // Auth State (cho Zustand Store)
 export interface AuthState {
-  token: string | null;
+  accessToken: string | null;   // Đổi từ 'token' thành 'accessToken'
   refreshToken: string | null;
   user: UserInfo | null;
   isAuthenticated: boolean;

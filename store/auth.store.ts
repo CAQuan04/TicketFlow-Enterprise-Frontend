@@ -1,18 +1,62 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { jwtDecode } from 'jwt-decode';
 import { authService } from '@/services/api';
 import { signalRConnection } from '@/lib/signalr-connection';
-import type { AuthState, UserInfo, LoginRequest, RegisterRequest } from '@/types';
+import type { 
+  AuthState, 
+  UserInfo, 
+  LoginRequest, 
+  RegisterRequest,
+  JwtPayload,
+  AuthResponse 
+} from '@/types';
 
 /**
- * Auth Store (Zustand)
- * Quản lý trạng thái authentication toàn cục
+ * Auth Store (Zustand) với JWT Refresh Token Support
  * 
  * Features:
- * - Persist token & user vào localStorage
+ * - JWT Decode: Extract user info từ accessToken
+ * - Persist accessToken & refreshToken vào localStorage
  * - Auto-connect SignalR khi login
  * - Auto-disconnect SignalR khi logout
+ * - setTokens(): Được gọi bởi Axios Interceptor khi refresh token thành công
+ * 
+ * Flow:
+ * 1. User login → Backend trả về { accessToken, refreshToken }
+ * 2. Decode accessToken → Extract UserInfo (id, email, name, role)
+ * 3. Save tokens vào Store (auto-persist to localStorage)
+ * 4. Connect SignalR với accessToken
+ * 5. Khi API call 401 → Axios Interceptor tự động refresh → gọi setTokens()
  */
+
+/**
+ * Helper: Decode JWT và extract UserInfo
+ * JWT payload structure từ Backend .NET:
+ * {
+ *   sub: "user-id",
+ *   email: "user@example.com",
+ *   name: "Full Name",
+ *   role: "Customer",
+ *   exp: 1735308000,
+ *   iat: 1735221600
+ * }
+ */
+function decodeToken(accessToken: string): UserInfo | null {
+  try {
+    const decoded = jwtDecode<JwtPayload>(accessToken);
+    
+    return {
+      userId: decoded.sub,
+      email: decoded.email,
+      fullName: decoded.name,
+      role: decoded.role as any, // Backend trả về string, cast về enum
+    };
+  } catch (error) {
+    console.error('Failed to decode JWT:', error);
+    return null;
+  }
+}
 
 interface AuthStore extends AuthState {
   // Actions
@@ -20,7 +64,7 @@ interface AuthStore extends AuthState {
   register: (data: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: UserInfo | null) => void;
-  setToken: (token: string | null, refreshToken?: string | null) => void;
+  setTokens: (accessToken: string, refreshToken: string) => void; // ✅ Đổi tên từ setToken
   initialize: () => Promise<void>;
 }
 
@@ -28,7 +72,7 @@ export const useAuthStore = create<AuthStore>()(
   persist(
     (set, get) => ({
       // Initial State
-      token: null,
+      accessToken: null,
       refreshToken: null,
       user: null,
       isAuthenticated: false,
@@ -41,22 +85,24 @@ export const useAuthStore = create<AuthStore>()(
 
           const response = await authService.login(credentials);
 
-          // Lưu token vào store
+          // Decode JWT để lấy user info
+          const user = decodeToken(response.accessToken);
+
+          if (!user) {
+            throw new Error('Invalid JWT token');
+          }
+
+          // Lưu tokens vào store (auto-persist to localStorage)
           set({
-            token: response.token,
+            accessToken: response.accessToken,
             refreshToken: response.refreshToken,
-            user: {
-              userId: response.userId,
-              email: response.email,
-              fullName: response.fullName,
-              role: response.role,
-            },
+            user,
             isAuthenticated: true,
             isLoading: false,
           });
 
-          // Connect SignalR với token mới
-          await signalRConnection.connect(response.token);
+          // Connect SignalR với accessToken mới
+          await signalRConnection.connect(response.accessToken);
         } catch (error) {
           set({ isLoading: false });
           throw error;
@@ -94,7 +140,7 @@ export const useAuthStore = create<AuthStore>()(
 
           // Clear store
           set({
-            token: null,
+            accessToken: null,
             refreshToken: null,
             user: null,
             isAuthenticated: false,
@@ -108,20 +154,38 @@ export const useAuthStore = create<AuthStore>()(
         set({ user });
       },
 
-      // Set token (dùng cho refresh token)
-      setToken: (token: string | null, refreshToken?: string | null) => {
+      /**
+       * setTokens: Được gọi bởi Axios Interceptor khi refresh token thành công
+       * 
+       * Flow:
+       * 1. API call bị 401
+       * 2. Axios Interceptor call /api/Auth/Refresh
+       * 3. Backend return { accessToken, refreshToken }
+       * 4. Interceptor gọi useAuthStore.getState().setTokens(newAccessToken, newRefreshToken)
+       * 5. Store update tokens + decode user info từ new accessToken
+       * 6. Axios retry original request với new accessToken
+       */
+      setTokens: (accessToken: string, refreshToken: string) => {
+        const user = decodeToken(accessToken);
+
+        if (!user) {
+          console.error('Failed to decode new access token');
+          return;
+        }
+
         set({
-          token,
-          refreshToken: refreshToken || get().refreshToken,
-          isAuthenticated: !!token,
+          accessToken,
+          refreshToken,
+          user,
+          isAuthenticated: true,
         });
       },
 
-      // Initialize: Load user từ token khi app start
+      // Initialize: Verify token khi app start
       initialize: async () => {
-        const { token } = get();
+        const { accessToken } = get();
 
-        if (!token) {
+        if (!accessToken) {
           set({ isLoading: false });
           return;
         }
@@ -129,8 +193,21 @@ export const useAuthStore = create<AuthStore>()(
         try {
           set({ isLoading: true });
 
-          // Fetch current user info
-          const user = await authService.getCurrentUser();
+          // Decode token để lấy user info
+          const user = decodeToken(accessToken);
+
+          if (!user) {
+            throw new Error('Invalid token');
+          }
+
+          // Check token expiration
+          const decoded = jwtDecode<JwtPayload>(accessToken);
+          const isExpired = decoded.exp * 1000 < Date.now();
+
+          if (isExpired) {
+            // Token expired, cần refresh (sẽ được handle bởi Axios Interceptor)
+            console.warn('Token expired, will refresh on next API call');
+          }
 
           set({
             user,
@@ -139,12 +216,12 @@ export const useAuthStore = create<AuthStore>()(
           });
 
           // Connect SignalR
-          await signalRConnection.connect(token);
+          await signalRConnection.connect(accessToken);
         } catch (error) {
           console.error('Initialize auth failed:', error);
           // Token invalid, clear store
           set({
-            token: null,
+            accessToken: null,
             refreshToken: null,
             user: null,
             isAuthenticated: false,
@@ -158,7 +235,7 @@ export const useAuthStore = create<AuthStore>()(
       storage: createJSONStorage(() => localStorage),
       // Chỉ persist những fields cần thiết
       partialize: (state) => ({
-        token: state.token,
+        accessToken: state.accessToken,
         refreshToken: state.refreshToken,
         user: state.user,
       }),

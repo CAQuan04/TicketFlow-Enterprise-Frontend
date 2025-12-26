@@ -1,12 +1,25 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { ApiErrorResponse } from '@/types';
+import { useAuthStore } from '@/store';
 
 /**
- * Axios Client được cấu hình với:
- * - Base URL từ environment
- * - JWT Token Interceptor (tự động gắn vào header)
- * - Response Interceptor (xử lý refresh token khi 401)
- * - Error Handler thống nhất
+ * Smart Axios Client với JWT Refresh Token Logic
+ * 
+ * Features:
+ * - Auto-attach JWT token vào mọi request
+ * - Auto-refresh khi 401 (token expired)
+ * - Queue concurrent requests during refresh
+ * - Auto-logout khi refresh token expired
+ * 
+ * Flow khi 401:
+ * 1. Request A bị 401 → Trigger refresh
+ * 2. Request B, C cũng bị 401 → Add vào queue (chờ A refresh xong)
+ * 3. A call /api/Auth/Refresh với { accessToken, refreshToken }
+ * 4. Backend return { accessToken, refreshToken } mới
+ * 5. A update Store → Zustand update accessToken
+ * 6. A retry request với new token
+ * 7. Process queue: B, C retry với new token
+ * 8. Nếu refresh fail → Logout user → Redirect /login
  */
 
 class AxiosClient {
@@ -30,13 +43,18 @@ class AxiosClient {
   }
 
   private setupInterceptors() {
-    // Request Interceptor: Tự động gắn JWT token
+    /**
+     * REQUEST INTERCEPTOR
+     * Tự động gắn Authorization header với accessToken từ Zustand Store
+     */
     this.instance.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
-        const token = this.getToken();
-        if (token && config.headers) {
-          config.headers.Authorization = `Bearer ${token}`;
+        const { accessToken } = useAuthStore.getState();
+        
+        if (accessToken && config.headers) {
+          config.headers.Authorization = `Bearer ${accessToken}`;
         }
+        
         return config;
       },
       (error) => {
@@ -44,7 +62,10 @@ class AxiosClient {
       }
     );
 
-    // Response Interceptor: Xử lý refresh token khi 401
+    /**
+     * RESPONSE INTERCEPTOR
+     * Xử lý 401 với Smart Refresh Token Logic
+     */
     this.instance.interceptors.response.use(
       (response) => response,
       async (error: AxiosError<ApiErrorResponse>) => {
@@ -52,16 +73,20 @@ class AxiosClient {
           _retry?: boolean;
         };
 
-        // Nếu lỗi 401 và chưa retry
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        // Kiểm tra: Lỗi 401 + chưa retry + không phải request /auth/refresh-token
+        const isUnauthorized = error.response?.status === 401;
+        const isNotRetried = !originalRequest._retry;
+        const isNotRefreshEndpoint = !originalRequest.url?.includes('/auth/refresh-token');
+
+        if (isUnauthorized && isNotRetried && isNotRefreshEndpoint) {
+          // Nếu đang refresh, add request vào queue
           if (this.isRefreshing) {
-            // Nếu đang refresh, thêm request vào queue
             return new Promise((resolve, reject) => {
               this.failedQueue.push({ resolve, reject });
             })
-              .then((token) => {
+              .then((accessToken) => {
                 if (originalRequest.headers) {
-                  originalRequest.headers.Authorization = `Bearer ${token}`;
+                  originalRequest.headers.Authorization = `Bearer ${accessToken}`;
                 }
                 return this.instance(originalRequest);
               })
@@ -70,13 +95,14 @@ class AxiosClient {
               });
           }
 
+          // Mark request là đã retry
           originalRequest._retry = true;
           this.isRefreshing = true;
 
-          const refreshToken = this.getRefreshToken();
+          const { accessToken, refreshToken } = useAuthStore.getState();
 
           if (!refreshToken) {
-            // Không có refresh token, logout user
+            // Không có refresh token → Logout ngay
             this.handleLogout();
             return Promise.reject(error);
           }
@@ -86,26 +112,27 @@ class AxiosClient {
             const response = await axios.post(
               `${process.env.NEXT_PUBLIC_API_URL}/auth/refresh-token`,
               {
-                token: this.getToken(),
-                refreshToken: refreshToken,
+                accessToken,  // Current access token
+                refreshToken, // Current refresh token
               }
             );
 
-            const { token: newToken, refreshToken: newRefreshToken } = response.data.data;
+            const { accessToken: newAccessToken, refreshToken: newRefreshToken } = 
+              response.data.data;
 
-            // Lưu token mới
-            this.setToken(newToken, newRefreshToken);
+            // Update Store với tokens mới (Zustand sẽ persist to localStorage)
+            useAuthStore.getState().setTokens(newAccessToken, newRefreshToken);
 
-            // Process queue
-            this.processQueue(null, newToken);
+            // Process queue: Retry tất cả failed requests với new token
+            this.processQueue(null, newAccessToken);
 
-            // Retry original request
+            // Retry original request với new token
             if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
             }
             return this.instance(originalRequest);
           } catch (refreshError) {
-            // Refresh token failed, logout user
+            // Refresh token failed → Logout user
             this.processQueue(refreshError, null);
             this.handleLogout();
             return Promise.reject(refreshError);
@@ -119,6 +146,11 @@ class AxiosClient {
     );
   }
 
+  /**
+   * Process Queue: Retry tất cả failed requests trong queue
+   * @param error - Nếu có error, reject tất cả requests
+   * @param token - New access token để retry requests
+   */
   private processQueue(error: any, token: string | null = null) {
     this.failedQueue.forEach((prom) => {
       if (error) {
@@ -131,27 +163,19 @@ class AxiosClient {
     this.failedQueue = [];
   }
 
-  private getToken(): string | null {
-    if (typeof window === 'undefined') return null;
-    return localStorage.getItem('token');
-  }
-
-  private getRefreshToken(): string | null {
-    if (typeof window === 'undefined') return null;
-    return localStorage.getItem('refreshToken');
-  }
-
-  private setToken(token: string, refreshToken: string) {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem('token', token);
-    localStorage.setItem('refreshToken', refreshToken);
-  }
-
+  /**
+   * Handle Logout: Clear store + redirect to login
+   * Được gọi khi:
+   * - Refresh token không tồn tại
+   * - Refresh token expired/invalid
+   */
   private handleLogout() {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
+
+    // Clear Zustand store (sẽ tự động clear localStorage)
+    useAuthStore.getState().logout();
+
+    // Redirect to login
     window.location.href = '/login';
   }
 
