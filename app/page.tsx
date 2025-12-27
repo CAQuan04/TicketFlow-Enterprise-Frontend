@@ -1,65 +1,93 @@
-import Image from "next/image";
+import Link from 'next/link';
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+      <div className="w-full max-w-2xl p-8">
+        {/* Logo & Brand */}
+        <div className="mb-12 text-center">
+          <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 shadow-2xl shadow-blue-500/50">
+            <svg
+              className="h-14 w-14 text-white"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"
+              />
+            </svg>
+          </div>
+          <h1 className="mb-4 text-5xl font-bold text-gray-900">TicketFlow</h1>
+          <p className="text-xl text-gray-600">
+            Nền tảng đặt vé sự kiện hàng đầu Việt Nam
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        {/* Auth Buttons */}
+        <div className="space-y-4">
+          <Link
+            href="/login"
+            className="block w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-4 text-center text-lg font-semibold text-white shadow-xl shadow-blue-500/30 transition-all hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/40"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            Đăng nhập
+          </Link>
+
+          <Link
+            href="/register"
+            className="block w-full rounded-xl border-2 border-blue-600 bg-white px-8 py-4 text-center text-lg font-semibold text-blue-600 shadow-lg transition-all hover:scale-105 hover:bg-blue-50"
           >
-            Documentation
-          </a>
+            Đăng ký tài khoản mới
+          </Link>
         </div>
-      </main>
+
+        {/* Features */}
+        <div className="mt-12 grid grid-cols-3 gap-6 text-center">
+          <div className="rounded-xl bg-white p-6 shadow-lg">
+            <div className="mb-3 text-3xl font-bold text-blue-600">50K+</div>
+            <div className="text-sm text-gray-600">Người dùng</div>
+          </div>
+          <div className="rounded-xl bg-white p-6 shadow-lg">
+            <div className="mb-3 text-3xl font-bold text-indigo-600">1000+</div>
+            <div className="text-sm text-gray-600">Sự kiện</div>
+          </div>
+          <div className="rounded-xl bg-white p-6 shadow-lg">
+            <div className="mb-3 text-3xl font-bold text-purple-600">4.9★</div>
+            <div className="text-sm text-gray-600">Đánh giá</div>
+          </div>
+        </div>
+
+        {/* Test Links */}
+        <div className="mt-8 rounded-xl border border-gray-200 bg-white p-6 shadow-lg">
+          <h3 className="mb-4 text-sm font-semibold text-gray-700">
+            🧪 Development Links:
+          </h3>
+          <div className="space-y-2 text-sm">
+            <Link
+              href="/test-auth-ui"
+              className="block text-blue-600 hover:underline"
+            >
+              → Test Auth UI (Form validation testing)
+            </Link>
+            <a
+              href="https://localhost:7207/swagger"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-blue-600 hover:underline"
+            >
+              → Backend API (Swagger)
+            </a>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 text-center text-sm text-gray-500">
+          © 2024 TicketFlow. All rights reserved.
+        </div>
+      </div>
     </div>
   );
 }

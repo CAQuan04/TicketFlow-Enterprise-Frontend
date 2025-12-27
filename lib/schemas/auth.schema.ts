@@ -142,6 +142,20 @@ export const registerSchema = z
         },
         { message: 'Số điện thoại không hợp lệ (VD: 0912345678)' }
       ),
+
+    dateOfBirth: z
+      .string()
+      .optional()
+      .refine(
+        (val) => {
+          if (!val) return true; // Optional field
+          const date = new Date(val);
+          const today = new Date();
+          const age = today.getFullYear() - date.getFullYear();
+          return age >= 13 && age <= 120; // Phải từ 13 tuổi trở lên
+        },
+        { message: 'Bạn phải từ 13 tuổi trở lên' }
+      ),
   })
   /**
    * Cross-field validation: confirmPassword phải match password

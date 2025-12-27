@@ -33,9 +33,10 @@ import { cn } from '@/lib/utils/helpers';
 export interface InputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'className'> {
   /**
-   * Label text hiển thị phía trên input
+   * Label text hiển thị phía trên input (optional)
+   * Nếu không truyền label, component sẽ render input standalone
    */
-  label: string;
+  label?: string;
 
   /**
    * Error message từ validation (react-hook-form)
@@ -93,11 +94,13 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
     return (
       <div className={cn('w-full', containerClassName)}>
-        {/* Label */}
-        <label className="mb-2 block text-sm font-medium text-gray-700">
-          {label}
-          {required && <span className="ml-1 text-red-500">*</span>}
-        </label>
+        {/* Label (chỉ render nếu có label prop) */}
+        {label && (
+          <label className="mb-2 block text-sm font-medium text-gray-700">
+            {label}
+            {required && <span className="ml-1 text-red-500">*</span>}
+          </label>
+        )}
 
         {/* Input Container (để wrap input + icon) */}
         <div className="relative">
