@@ -1,324 +1,265 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useGoogleLogin } from '@react-oauth/google';
 import toast from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/store';
 import { axiosClient } from '@/lib/axios-client';
 
 /**
- * Google Login Button Component
- * 
- * ====================================
- * ARCHITECTURE & SECURITY EXPLANATION
- * ====================================
- * 
- * 1. IMPLICIT FLOW vs AUTHORIZATION CODE FLOW:
- * 
- *    Implicit Flow (flow: 'implicit'):
- *    ✅ Trực tiếp nhận ID Token từ Google
- *    ✅ Frontend có thể decode để hiển thị user info ngay
- *    ❌ Access Token exposed trên URL hash
- *    ❌ Không có Refresh Token
- * 
- *    Authorization Code Flow (flow: 'auth-code'):
- *    ✅ Nhận auth code → Backend exchange với Google
- *    ✅ Backend lưu Access Token + Refresh Token (secure)
- *    ✅ Best practice cho OAuth 2.0
- *    ❌ Cần thêm 1 network round-trip
- * 
- *    → Chúng ta dùng IMPLICIT để đơn giản, vì:
- *       - Token chỉ dùng 1 lần để verify
- *       - Backend tự generate JWT tokens của riêng mình
- * 
- * 2. ID TOKEN vs ACCESS TOKEN:
- * 
- *    ID Token (JWT):
- *    {
- *      "iss": "accounts.google.com",
- *      "sub": "google-user-id-123",
- *      "email": "user@gmail.com",
- *      "name": "John Doe",
- *      "picture": "https://...",
- *      "aud": "YOUR_CLIENT_ID",
- *      "exp": 1735308000
- *    }
- *    → Backend verify signature với Google's public key
- *    → Extract user info an toàn
- * 
- *    Access Token (Opaque String):
- *    "ya29.a0AfH6SMBx..."
- *    → Chỉ dùng để call Google APIs (Gmail, Drive, etc.)
- *    → Backend không thể verify được
- * 
- * 3. BACKEND VALIDATION FLOW:
- * 
- *    POST /auth/google
- *    {
- *      "token": "eyJhbGciOiJSUzI1NiIs...",  // ID Token
- *      "provider": 1                         // Enum: Google = 1
- *    }
- * 
- *    Backend .NET:
- *    1. GoogleJsonWebSignature.ValidateAsync(token)
- *    2. Check issuer = "accounts.google.com"
- *    3. Check audience = YOUR_CLIENT_ID
- *    4. Check expiry
- *    5. Extract email, name, picture
- *    6. Find or create user in database
- *    7. Generate JWT tokens (accessToken, refreshToken)
- *    8. Return { accessToken, refreshToken }
- * 
- * ====================================
- * USAGE
- * ====================================
- * 
- * Import vào Login Page:
- * 
- * ```tsx
- * import { GoogleLoginBtn } from '@/components/auth/GoogleLoginBtn';
- * 
- * export default function LoginPage() {
- *   return (
- *     <div>
- *       <GoogleLoginBtn />
- *       <p>Hoặc đăng nhập với email</p>
- *       <form>...</form>
- *     </div>
- *   );
- * }
- * ```
- * 
- * ====================================
- * ERROR HANDLING
- * ====================================
- * 
- * - User closes popup → Silent fail (không hiển thị error)
- * - Network error → Toast: "Có lỗi xảy ra"
- * - Backend error → Toast: "Đăng nhập Google thất bại"
- * - Invalid token → Backend trả về 400/401
- * 
- * ====================================
- * TESTING
- * ====================================
- * 
- * 1. Setup Google OAuth:
- *    - Google Cloud Console → APIs & Services → Credentials
- *    - Create OAuth 2.0 Client ID
- *    - Authorized JavaScript origins: http://localhost:3000
- *    - Copy Client ID → .env.local
- * 
- * 2. Test Flow:
- *    - Click button → Popup opens
- *    - Select Google account
- *    - Authorize → Popup closes
- *    - Check console: "ID Token:", "Backend response:"
- *    - Should redirect to home page
- *    - Check localStorage: accessToken, refreshToken
- * 
- * 3. Test Errors:
- *    - Close popup immediately → No error shown
- *    - Turn off Backend → Toast error
- *    - Invalid Client ID → OAuth error
+ * Google Identity Services - Type Definitions
  */
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: GoogleIdConfiguration) => void;
+          renderButton: (parent: HTMLElement, options: GsiButtonConfiguration) => void;
+          prompt: () => void;
+        };
+      };
+    };
+  }
+}
 
+interface GoogleIdConfiguration {
+  client_id: string;
+  callback: (response: CredentialResponse) => void;
+  auto_select?: boolean;
+  cancel_on_tap_outside?: boolean;
+}
+
+interface CredentialResponse {
+  credential: string;
+  select_by?: string;
+}
+
+interface GsiButtonConfiguration {
+  type?: 'standard' | 'icon';
+  theme?: 'outline' | 'filled_blue' | 'filled_black';
+  size?: 'large' | 'medium' | 'small';
+  text?: 'signin_with' | 'signup_with' | 'continue_with' | 'signin';
+  shape?: 'rectangular' | 'pill' | 'circle' | 'square';
+  logo_alignment?: 'left' | 'center';
+  width?: string | number;
+}
+
+/**
+ * Google Login Button Props
+ */
 interface GoogleLoginBtnProps {
-  /**
-   * Custom text for button
-   * Default: "Đăng nhập với Google"
-   */
   text?: string;
-
-  /**
-   * Full width button
-   * Default: true
-   */
   fullWidth?: boolean;
-
-  /**
-   * Callback on success (optional)
-   */
   onSuccess?: () => void;
 }
 
+/**
+ * Google Login Button Component
+ * 
+ * Uses Google Identity Services (GIS) to get JWT Credential
+ * 
+ * Why GIS instead of OAuth2 Popup:
+ * - OAuth2 implicit flow doesn't guarantee id_token
+ * - GIS always returns JWT credential (ID Token)
+ * - Backend requires ID Token for GoogleJsonWebSignature.ValidateAsync
+ * 
+ * Flow:
+ * 1. Load Google Identity Services script
+ * 2. Initialize with client_id and callback
+ * 3. Render button
+ * 4. User clicks → Google popup
+ * 5. Google returns CredentialResponse with JWT credential
+ * 6. Send credential to Backend
+ * 7. Backend validates and returns app tokens
+ */
 export function GoogleLoginBtn({
   text = 'Đăng nhập với Google',
   fullWidth = true,
   onSuccess,
 }: GoogleLoginBtnProps) {
   const router = useRouter();
-  const login = useAuthStore((state) => state.login);
   const [isLoading, setIsLoading] = useState(false);
+  const buttonRef = useRef<HTMLDivElement>(null);
 
   /**
-   * Google OAuth Login Hook
-   * 
-   * Flow: implicit (nhận ID Token trực tiếp)
-   * Scope: openid email profile (default)
-   * 
-   * onSuccess: Nhận tokenResponse chứa:
-   * - access_token: Google Access Token (dùng để call Google APIs)
-   * - id_token: JWT chứa user info (GỬI CÁI NÀY CHO BACKEND)
-   * - expires_in: Token expiry (seconds)
-   * - scope: Permissions được granted
-   * - token_type: "Bearer"
+   * Initialize Google Identity Services
    */
-  const googleLogin = useGoogleLogin({
-    flow: 'implicit',
-    onSuccess: async (tokenResponse) => {
-      try {
-        setIsLoading(true);
-
-        console.log('✅ Google OAuth Success:', {
-          hasAccessToken: !!tokenResponse.access_token,
-          expiresIn: tokenResponse.expires_in,
-          scope: tokenResponse.scope,
-        });
-
-        // ⚠️ CRITICAL: Check if we have access_token
-        // Note: With implicit flow, we might not get id_token directly
-        // We need to use access_token to fetch user info from Google
-        if (!tokenResponse.access_token) {
-          throw new Error('No access token received from Google');
-        }
-
-        /**
-         * Backend API Call
-         * 
-         * Endpoint: POST /auth/google
-         * Payload: { token, provider }
-         * 
-         * Backend sẽ:
-         * 1. Dùng access_token để call Google UserInfo API
-         * 2. Lấy email, name, picture
-         * 3. Find or create user
-         * 4. Generate JWT tokens
-         */
-        const response = await axiosClient.post<{
-          accessToken: string;
-          refreshToken: string;
-        }>('/auth/google', {
-          token: tokenResponse.access_token, // Gửi access_token
-          provider: 1, // Enum: 1 = Google
-        });
-
-        console.log('✅ Backend Response:', {
-          hasAccessToken: !!response.data.accessToken,
-          hasRefreshToken: !!response.data.refreshToken,
-        });
-
-        /**
-         * Save Tokens to Store
-         * 
-         * authStore.login() sẽ:
-         * 1. Call Backend API để verify credentials (nhưng ở đây ta đã có tokens rồi)
-         * 2. Decode JWT để extract user info
-         * 3. Save vào localStorage (persist)
-         * 4. Connect SignalR
-         * 
-         * → Vì ta đã có tokens, ta dùng setTokens() trực tiếp
-         */
-        const setTokens = useAuthStore.getState().setTokens;
-        setTokens(response.data.accessToken, response.data.refreshToken);
-
-        // Get user info from decoded JWT
-        const user = useAuthStore.getState().user;
-
-        // Success notification
-        toast.success(`Chào mừng, ${user?.fullName || 'bạn'}!`);
-
-        // Callback (if provided)
-        if (onSuccess) {
-          onSuccess();
-        }
-
-        // Redirect to home
-        router.push('/');
-      } catch (error: any) {
-        console.error('❌ Google Login Error:', error);
-
-        // Handle specific error types
-        if (error.response?.status === 400) {
-          toast.error('Token Google không hợp lệ');
-        } else if (error.response?.status === 401) {
-          toast.error('Không thể xác thực tài khoản Google');
-        } else {
-          toast.error('Đăng nhập Google thất bại. Vui lòng thử lại.');
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    },
+  useEffect(() => {
+    // Wait for Google script to load
+    if (!window.google || !buttonRef.current) return;
 
     /**
-     * onError: User đóng popup hoặc OAuth failed
+     * Initialize Google Identity Services
      * 
-     * Không hiển thị error vì user có thể:
-     * - Đóng popup cố ý (không phải lỗi)
-     * - Chọn account khác
-     * - Quay lại để dùng email/password
+     * callback: Called when user successfully signs in
+     * - response.credential = JWT ID Token
+     * - This is exactly what Backend needs!
      */
-    onError: (errorResponse) => {
-      console.log('⚠️ Google OAuth Error:', errorResponse);
-      // Silent fail - user might have closed popup intentionally
-      setIsLoading(false);
-    },
+    window.google.accounts.id.initialize({
+      client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
+      callback: handleGoogleResponse,
+      auto_select: false,
+      cancel_on_tap_outside: true,
+    });
 
     /**
-     * onNonOAuthError: Network errors, SDK errors
+     * Render Sign In Button
+     * 
+     * Google will render a styled button in buttonRef div
      */
-    onNonOAuthError: (nonOAuthError) => {
-      console.error('❌ Google OAuth Non-OAuth Error:', nonOAuthError);
-      toast.error('Có lỗi xảy ra. Vui lòng thử lại sau.');
+    window.google.accounts.id.renderButton(
+      buttonRef.current,
+      {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        width: fullWidth ? buttonRef.current.offsetWidth : undefined,
+      }
+    );
+  }, [fullWidth]);
+
+  /**
+   * Handle Google Identity Services Response
+   * 
+   * response.credential = JWT ID Token
+   * Format: "eyJhbGciOiJSUzI1NiIs..."
+   * 
+   * This is what Backend GoogleAuthService expects!
+   */
+  const handleGoogleResponse = async (response: CredentialResponse) => {
+    try {
+      setIsLoading(true);
+
+      console.log('✅ Google Identity Services Success:', {
+        hasCredential: !!response.credential,
+        credentialLength: response.credential?.length,
+        credentialPreview: response.credential?.substring(0, 50) + '...',
+      });
+
+      const idToken = response.credential;
+
+      if (!idToken) {
+        throw new Error('No credential received from Google');
+      }
+
+      console.log('📤 Sending ID Token to Backend:', {
+        endpoint: '/auth/google',
+        tokenType: 'ID_TOKEN (JWT Credential)',
+        tokenLength: idToken.length,
+        provider: 1,
+      });
+
+      /**
+       * Send ID Token to Backend
+       * 
+       * Backend will:
+       * 1. GoogleJsonWebSignature.ValidateAsync(idToken)
+       * 2. Verify signature with Google's public key
+       * 3. Extract user info from JWT payload
+       * 4. Find or create user in database
+       * 5. Generate app JWT tokens (accessToken, refreshToken)
+       */
+      const apiResponse = await axiosClient.post('/auth/google', {
+        token: idToken, // ✅ JWT Credential from Google Identity Services
+        provider: 1, // Enum: 1 = Google
+      });
+
+      console.log('✅ Backend Response:', {
+        rawResponse: apiResponse.data,
+        responseType: typeof apiResponse.data,
+        isString: typeof apiResponse.data === 'string',
+        fullResponse: JSON.stringify(apiResponse.data, null, 2),
+      });
+
+      /**
+       * Backend may return:
+       * 1. { accessToken, refreshToken } - object format
+       * 2. Direct string token - string format
+       * 
+       * Handle both cases
+       */
+      let accessToken: string;
+      let refreshToken: string;
+
+      if (typeof apiResponse.data === 'string') {
+        // Backend returns raw JWT string (needs parsing)
+        // This might be wrapped in quotes, so parse it
+        const parsed = typeof apiResponse.data === 'string' 
+          ? apiResponse.data.replace(/^"|"$/g, '') // Remove quotes if wrapped
+          : apiResponse.data;
+        
+        console.log('⚠️ Backend returned string, using as accessToken:', parsed.substring(0, 50));
+        accessToken = parsed;
+        refreshToken = ''; // No refresh token in this format
+      } else if (apiResponse.data.accessToken && apiResponse.data.refreshToken) {
+        // Standard format
+        accessToken = apiResponse.data.accessToken;
+        refreshToken = apiResponse.data.refreshToken;
+      } else {
+        throw new Error('Invalid response format from backend');
+      }
+
+      console.log('🟢 Parsed tokens:', {
+        accessTokenLength: accessToken?.length,
+        refreshTokenLength: refreshToken?.length,
+        accessTokenPreview: accessToken?.substring(0, 50) + '...',
+      });
+
+      /**
+       * Save Tokens to Store
+       * 
+       * authStore.setTokens() will:
+       * 1. Decode JWT to extract user info
+       * 2. Save to localStorage (persist)
+       * 3. Set isAuthenticated = true
+       */
+      const setTokens = useAuthStore.getState().setTokens;
+      setTokens(accessToken, refreshToken);
+
+      // Get user info from decoded JWT
+      const user = useAuthStore.getState().user;
+
+      // Success notification
+      toast.success(`Chào mừng, ${user?.fullName || 'bạn'}!`);
+
+      // Callback (if provided)
+      if (onSuccess) {
+        onSuccess();
+      }
+
+      // Redirect to home
+      router.push('/');
+    } catch (error: unknown) {
+      console.error('❌ Google Login Error:', error);
+
+      const err = error as { response?: { data?: any; status?: number } };
+
+      // Show error message from Backend or generic message
+      const errorMessage =
+        err.response?.data?.message || 'Đăng nhập Google thất bại. Vui lòng thử lại.';
+
+      toast.error(errorMessage);
+    } finally {
       setIsLoading(false);
-    },
-  });
+    }
+  };
 
   return (
-    <button
-      type="button"
-      onClick={() => googleLogin()}
-      disabled={isLoading}
-      className={`
-        flex items-center justify-center gap-3 rounded-lg border-2 border-gray-300 bg-white px-4 py-3
-        font-medium text-gray-700 shadow-sm transition-all
-        hover:border-gray-400 hover:bg-gray-50 hover:shadow-md
-        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-        disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white disabled:hover:border-gray-300
-        ${fullWidth ? 'w-full' : ''}
-      `}
-    >
-      {isLoading ? (
-        <>
-          <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-          <span>Đang xử lý...</span>
-        </>
-      ) : (
-        <>
-          {/* Google Logo SVG */}
-          <svg className="h-5 w-5" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-            />
-          </svg>
-          <span>{text}</span>
-        </>
+    <div className="relative">
+      {/* Google Identity Services Button */}
+      <div ref={buttonRef} className={fullWidth ? 'w-full' : ''} />
+
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/80 rounded-lg z-10">
+          <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+        </div>
       )}
-    </button>
+    </div>
   );
 }

@@ -44,12 +44,36 @@ import type {
  */
 function decodeToken(accessToken: string): UserInfo | null {
   try {
+    console.log('🔍 Decoding token:', {
+      tokenLength: accessToken?.length,
+      tokenPreview: accessToken?.substring(0, 50) + '...',
+    });
+    
     const decoded = jwtDecode<JwtPayload>(accessToken);
+    
+    console.log('🔍 Decoded JWT:', {
+      decoded,
+      sub: decoded.sub,
+      email: decoded.email,
+      name: decoded.name,
+      fullName: decoded['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'],
+      givenName: decoded.given_name,
+      role: decoded.role,
+      allKeys: Object.keys(decoded),
+    });
+    
+    // Backend may use different claim names for fullName
+    const fullName = 
+      decoded.name || 
+      decoded['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] ||
+      decoded.given_name ||
+      decoded.email?.split('@')[0] || // Fallback: use email username
+      'User';
     
     return {
       userId: decoded.sub,
       email: decoded.email,
-      fullName: decoded.name,
+      fullName: fullName,
       role: decoded.role as any, // Backend trả về string, cast về enum
     };
   } catch (error) {
@@ -166,6 +190,15 @@ export const useAuthStore = create<AuthStore>()(
        * 6. Axios retry original request với new accessToken
        */
       setTokens: (accessToken: string, refreshToken: string) => {
+        console.log('🔵 setTokens called:', {
+          accessTokenType: typeof accessToken,
+          refreshTokenType: typeof refreshToken,
+          accessTokenStringified: JSON.stringify(accessToken),
+          refreshTokenStringified: JSON.stringify(refreshToken),
+          accessTokenIsString: typeof accessToken === 'string',
+          refreshTokenIsString: typeof refreshToken === 'string',
+        });
+        
         const user = decodeToken(accessToken);
 
         if (!user) {

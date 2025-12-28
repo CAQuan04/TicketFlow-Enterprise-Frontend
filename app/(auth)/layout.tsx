@@ -1,7 +1,7 @@
 'use client';
 
 import { Toaster } from 'react-hot-toast';
-import { GoogleAuthProvider } from '@/providers/google-auth-provider';
+import Script from 'next/script';
 
 /**
  * Auth Layout - Split Screen Design (Enterprise Style)
@@ -14,7 +14,7 @@ import { GoogleAuthProvider } from '@/providers/google-auth-provider';
  * - Dark overlay trên image để text rõ ràng hơn
  * 
  * Features:
- * - GoogleOAuthProvider wrapper cho OAuth flow
+ * - Google Identity Services script cho OAuth
  * - Toaster notifications global
  * - Responsive design
  * - Modern gradient background
@@ -35,7 +35,13 @@ interface AuthLayoutProps {
 
 export default function AuthLayout({ children }: AuthLayoutProps) {
   return (
-    <GoogleAuthProvider>
+    <>
+      {/* Google Identity Services Script */}
+      <Script
+        src="https://accounts.google.com/gsi/client"
+        strategy="afterInteractive"
+      />
+
       <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
         {/* Left Side - Image & Branding (Hidden on mobile) */}
         <div className="relative hidden w-1/2 lg:block">
@@ -199,6 +205,6 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
           },
         }}
       />
-    </GoogleAuthProvider>
+    </>
   );
 }

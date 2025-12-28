@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
@@ -54,9 +54,16 @@ import { GoogleLoginBtn } from '@/components/auth/GoogleLoginBtn';
 
 export default function LoginPage() {
   const router = useRouter();
-  const login = useAuthStore((state) => state.login);
+  const { login, isAuthenticated } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // Auto-redirect if already logged in
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace('/');
+    }
+  }, [isAuthenticated, router]);
 
   // React Hook Form với Zod validation
   const {
@@ -89,8 +96,10 @@ export default function LoginPage() {
       const user = useAuthStore.getState().user;
       toast.success(`Chào mừng trở lại, ${user?.fullName || 'bạn'}!`);
 
-      // Redirect to home
-      router.push('/');
+      // Small delay to ensure state update completes
+      setTimeout(() => {
+        router.replace('/');
+      }, 100);
     } catch (error: any) {
       // Handle Backend errors
       if (error.response?.status === 400) {

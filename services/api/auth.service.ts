@@ -30,14 +30,15 @@ const AUTH_ENDPOINTS = {
 export const authService = {
   /**
    * Login user
-   * Backend return: { accessToken, refreshToken, userId, email, fullName, role }
+   * Backend return: { accessToken, refreshToken }
+   * Note: Không có wrapper { data: {...} }
    */
   async login(data: LoginRequest): Promise<AuthResponse> {
-    const response = await axiosClient.post<ApiResponse<AuthResponse>>(
+    const response = await axiosClient.post<AuthResponse>(
       AUTH_ENDPOINTS.LOGIN,
       data
     );
-    return response.data.data!;
+    return response.data;
   },
 
   /**

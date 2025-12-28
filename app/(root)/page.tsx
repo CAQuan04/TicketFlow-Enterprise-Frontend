@@ -1,7 +1,10 @@
+'use client';
+
 import React from 'react';
 import Link from 'next/link';
 import { Button } from 'antd';
-import { CalendarOutlined, TrophyOutlined, SafetyOutlined } from '@ant-design/icons';
+import { CalendarOutlined, TrophyOutlined, SafetyOutlined, RocketOutlined } from '@ant-design/icons';
+import { useAuthStore } from '@/store';
 
 /**
  * Home Page
@@ -9,35 +12,74 @@ import { CalendarOutlined, TrophyOutlined, SafetyOutlined } from '@ant-design/ic
  * Route: /
  * Layout: (root)
  * 
- * NOTE: Server Component (không cần 'use client')
- * Fetch data sẽ làm trong các component con
+ * Features:
+ * - Dynamic content based on auth state
+ * - Show login/register for guests
+ * - Show personalized content for authenticated users
  */
 
 export default function HomePage() {
+  const { isAuthenticated, user } = useAuthStore();
+
   return (
     <div>
       {/* Hero Section */}
       <section className="bg-gradient-to-br from-blue-600 to-indigo-700 py-20 text-white">
         <div className="container mx-auto text-center">
-          <h1 className="mb-6 text-5xl font-bold">
-            Đặt vé sự kiện dễ dàng
-          </h1>
-          <p className="mb-8 text-xl text-blue-100">
-            Hàng nghìn sự kiện đang chờ bạn khám phá
-          </p>
-          
-          <div className="flex justify-center gap-4">
-            <Link href="/events">
-              <Button type="primary" size="large" className="h-12 px-8">
-                Khám phá sự kiện
-              </Button>
-            </Link>
-            <Link href="/register">
-              <Button size="large" className="h-12 px-8" ghost>
-                Đăng ký ngay
-              </Button>
-            </Link>
-          </div>
+          {isAuthenticated ? (
+            <>
+              <h1 className="mb-6 text-5xl font-bold">
+                Chào mừng trở lại, {user?.fullName || 'bạn'}! 👋
+              </h1>
+              <p className="mb-8 text-xl text-blue-100">
+                Khám phá các sự kiện mới nhất và đặt vé ngay hôm nay
+              </p>
+              
+              <div className="flex justify-center gap-4">
+                <Link href="/events">
+                  <Button 
+                    type="primary" 
+                    size="large" 
+                    className="h-12 px-8 bg-white text-blue-600 hover:bg-blue-50 border-0"
+                    icon={<RocketOutlined />}
+                  >
+                    Khám phá sự kiện
+                  </Button>
+                </Link>
+                <Link href="/booking">
+                  <Button 
+                    size="large" 
+                    className="h-12 px-8" 
+                    ghost
+                  >
+                    Vé của tôi
+                  </Button>
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <h1 className="mb-6 text-5xl font-bold">
+                Đặt vé sự kiện dễ dàng
+              </h1>
+              <p className="mb-8 text-xl text-blue-100">
+                Hàng nghìn sự kiện đang chờ bạn khám phá
+              </p>
+              
+              <div className="flex justify-center gap-4">
+                <Link href="/events">
+                  <Button type="primary" size="large" className="h-12 px-8">
+                    Khám phá sự kiện
+                  </Button>
+                </Link>
+                <Link href="/login">
+                  <Button size="large" className="h-12 px-8" ghost>
+                    Đăng nhập
+                  </Button>
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -118,21 +160,39 @@ export default function HomePage() {
       </section>
 
       {/* CTA Section */}
-      <section className="section bg-primary py-16 text-white">
-        <div className="container mx-auto text-center">
-          <h2 className="mb-4 text-3xl font-bold">
-            Bạn là nhà tổ chức sự kiện?
-          </h2>
-          <p className="mb-8 text-lg text-blue-100">
-            Tạo và quản lý sự kiện của bạn trên TicketFlow
-          </p>
-          <Link href="/register">
+      {!isAuthenticated && (
+        <section className="section bg-primary py-16 text-white">
+          <div className="container mx-auto text-center">
+            <h2 className="mb-4 text-3xl font-bold">
+              Sẵn sàng tham gia sự kiện?
+            </h2>
+            <p className="mb-8 text-lg text-blue-100">
+              Đăng ký ngay để không bỏ lỡ các ưu đãi độc quyền
+            </p>
+            <Link href="/register">
+              <Button size="large" className="h-12 px-8" ghost>
+                Đăng ký miễn phí
+              </Button>
+            </Link>
+          </div>
+        </section>
+      )}
+
+      {isAuthenticated && user?.role === 'Customer' && (
+        <section className="section bg-gradient-to-br from-purple-600 to-pink-600 py-16 text-white">
+          <div className="container mx-auto text-center">
+            <h2 className="mb-4 text-3xl font-bold">
+              Bạn là nhà tổ chức sự kiện?
+            </h2>
+            <p className="mb-8 text-lg text-purple-100">
+              Nâng cấp tài khoản để tạo và quản lý sự kiện của riêng bạn
+            </p>
             <Button size="large" className="h-12 px-8" ghost>
-              Đăng ký làm Organizer
+              Trở thành Organizer
             </Button>
-          </Link>
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
