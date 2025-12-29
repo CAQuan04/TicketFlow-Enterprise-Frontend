@@ -1,152 +1,201 @@
 import { axiosClient } from '@/lib/axios-client';
+import { useAuthStore } from '@/store';
 import {
   EventListDto,
   EventDetailDto,
-  CreateEventRequest,
-  UpdateEventRequest,
-  EventSearchParams,
-  PaginatedResponse,
-  ApiResponse,
+  PagedResult,
 } from '@/types';
 
 /**
  * Event Service
- * Xử lý tất cả API calls liên quan đến events
+ * ✅ Xử lý tất cả API calls liên quan đến events
+ * ✅ Smart Logic: Detect logged-in user để call AI recommendation
+ * ✅ Elasticsearch: Smart autocomplete với fuzzy search
  */
 
 const EVENT_ENDPOINTS = {
   EVENTS: '/events',
   EVENT_DETAIL: (id: string) => `/events/${id}`,
-  FEATURED_EVENTS: '/events/featured',
-  UPCOMING_EVENTS: '/events/upcoming',
-  SEARCH_EVENTS: '/events/search',
-  MY_EVENTS: '/events/my-events', // Cho organizer
+  RECOMMENDATIONS: '/events/recommendations', // AI endpoint (for logged-in users)
+  SEARCH_SMART: '/search/smart', // ✅ Elasticsearch autocomplete (corrected endpoint)
 };
+
+/**
+ * Event Search/Filter Parameters
+ * Backend: GetEventsQuery.cs
+ */
+export interface EventSearchParams {
+  searchTerm?: string; // Search by name/description
+  pageIndex?: number; // Page number (1-based)
+  pageSize?: number; // Items per page
+  venueId?: string; // Filter by venue
+  fromDate?: string; // Filter start date (ISO format)
+  toDate?: string; // Filter end date (ISO format)
+  categoryId?: string; // Filter by category
+  minPrice?: number; // Filter min price
+  maxPrice?: number; // Filter max price
+}
 
 export const eventService = {
   /**
-   * Get paginated events với filters
+   * Get Events với Pagination & Filters
+   * 
+   * Backend endpoint: GET /api/events
+   * Query params: searchTerm, pageIndex, pageSize, venueId, fromDate, toDate
+   * 
+   * @example
+   * const result = await eventService.getEvents({
+   *   searchTerm: 'concert',
+   *   pageIndex: 1,
+   *   pageSize: 12,
+   *   fromDate: '2024-01-01'
+   * });
+   * console.log(result.items, result.totalPages);
    */
-  async getEvents(params?: EventSearchParams): Promise<PaginatedResponse<EventListDto>> {
-    const response = await axiosClient.get<ApiResponse<PaginatedResponse<EventListDto>>>(
+  async getEvents(params?: EventSearchParams): Promise<PagedResult<EventListDto>> {
+    const response = await axiosClient.get<PagedResult<EventListDto>>(
       EVENT_ENDPOINTS.EVENTS,
-      { params }
+      { 
+        params: {
+          pageIndex: 1, // Default page 1
+          pageSize: 12, // Default 12 items
+          ...params, // Override with user params
+        }
+      }
     );
-    return response.data.data!;
+    
+    // Backend trả về trực tiếp PagedResult, không wrap trong ApiResponse
+    return response.data;
   },
 
   /**
-   * Get event detail by ID
+   * Get Event Detail by ID
+   * 
+   * Backend endpoint: GET /api/events/{id}
+   * 
+   * @param eventId - Event ID
+   * @returns Promise<EventDetailDto>
    */
   async getEventById(eventId: string): Promise<EventDetailDto> {
-    const response = await axiosClient.get<ApiResponse<EventDetailDto>>(
+    const response = await axiosClient.get<EventDetailDto>(
       EVENT_ENDPOINTS.EVENT_DETAIL(eventId)
     );
-    return response.data.data!;
+    return response.data;
   },
 
   /**
-   * Get featured events (trang chủ)
+   * Get Featured Events - SMART LOGIC
+   * 
+   * Logic thông minh:
+   * 1. Nếu user đã đăng nhập → Call AI Recommendation API
+   * 2. Nếu user là guest → Call danh sách sự kiện upcoming (top 5)
+   * 
+   * Why?
+   * - Logged-in users: Personalized recommendations based on history
+   * - Guest users: Show popular upcoming events
+   * 
+   * @returns Promise<EventListDto[]> - Array of featured/recommended events
+   * 
+   * @example
+   * // Trên homepage
+   * const featuredEvents = await eventService.getFeaturedEvents();
+   * // Nếu logged in: AI recommendations
+   * // Nếu guest: Top 5 upcoming events
    */
   async getFeaturedEvents(): Promise<EventListDto[]> {
-    const response = await axiosClient.get<ApiResponse<EventListDto[]>>(
-      EVENT_ENDPOINTS.FEATURED_EVENTS
-    );
-    return response.data.data!;
-  },
-
-  /**
-   * Get upcoming events
-   */
-  async getUpcomingEvents(limit?: number): Promise<EventListDto[]> {
-    const response = await axiosClient.get<ApiResponse<EventListDto[]>>(
-      EVENT_ENDPOINTS.UPCOMING_EVENTS,
-      { params: { limit } }
-    );
-    return response.data.data!;
-  },
-
-  /**
-   * Search events
-   */
-  async searchEvents(params: EventSearchParams): Promise<PaginatedResponse<EventListDto>> {
-    const response = await axiosClient.get<ApiResponse<PaginatedResponse<EventListDto>>>(
-      EVENT_ENDPOINTS.SEARCH_EVENTS,
-      { params }
-    );
-    return response.data.data!;
-  },
-
-  /**
-   * Create new event (Organizer only)
-   */
-  async createEvent(data: CreateEventRequest): Promise<EventDetailDto> {
-    // Nếu có file upload, dùng FormData
-    const formData = new FormData();
-
-    // Append các fields thông thường
-    Object.entries(data).forEach(([key, value]) => {
-      if (key === 'imageFile' || key === 'bannerFile') {
-        if (value) formData.append(key, value as File);
-      } else if (key === 'ticketTypes') {
-        formData.append(key, JSON.stringify(value));
-      } else if (key === 'tags') {
-        formData.append(key, JSON.stringify(value));
-      } else if (value !== undefined && value !== null) {
-        formData.append(key, value.toString());
+    // Check authentication state từ Zustand store
+    const isAuthenticated = useAuthStore.getState().isAuthenticated;
+    const accessToken = useAuthStore.getState().accessToken;
+    
+    // Logged-in users: Get AI personalized recommendations
+    if (isAuthenticated && accessToken) {
+      try {
+        console.log('🤖 Fetching AI recommendations for logged-in user');
+        
+        const response = await axiosClient.get<EventListDto[]>(
+          EVENT_ENDPOINTS.RECOMMENDATIONS
+        );
+        
+        // Backend trả về array trực tiếp
+        return response.data;
+      } catch (error) {
+        console.warn('⚠️ AI recommendations failed, fallback to upcoming events:', error);
+        
+        // Fallback: Nếu AI endpoint fail, dùng upcoming events
+        const pagedResult = await this.getEvents({
+          pageIndex: 1,
+          pageSize: 5,
+        });
+        
+        return pagedResult.items;
       }
+    }
+    
+    // Guest users: Get top upcoming events
+    console.log('👤 Guest user, fetching top upcoming events');
+    
+    const pagedResult = await this.getEvents({
+      pageIndex: 1,
+      pageSize: 5,
+      // Optional: Thêm filter để chỉ lấy upcoming events
+      // fromDate: new Date().toISOString(),
     });
-
-    const response = await axiosClient.post<ApiResponse<EventDetailDto>>(
-      EVENT_ENDPOINTS.EVENTS,
-      formData,
-      {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }
-    );
-    return response.data.data!;
+    
+    return pagedResult.items;
   },
 
   /**
-   * Update event (Organizer only)
+   * Smart Search - Elasticsearch Autocomplete
+   * 
+   * ============================================
+   * ELASTICSEARCH VS SQL
+   * ============================================
+   * 
+   * Tại sao dùng 2 systems?
+   * 
+   * 1. **Elasticsearch (Autocomplete Dropdown):**
+   *    - Fuzzy Search: Xử lý typo (blackpnk → BLACKPINK)
+   *    - Fast: < 50ms response time
+   *    - Purpose: User experience - gợi ý nhanh khi gõ
+   *    - Trả về: Top 10 suggestions
+   * 
+   * 2. **SQL Database (Main Grid Results):**
+   *    - Strict Pagination: Đảm bảo consistency
+   *    - Filtering: Complex joins với venues, categories
+   *    - Sorting: Consistent ordering
+   *    - Purpose: Chính xác, reliable data
+   * 
+   * Flow:
+   * 1. User gõ "blakpink" → Elasticsearch suggest "BLACKPINK World Tour"
+   * 2. User select suggestion → Navigate to /events/{id}
+   * 3. User nhấn Enter hoặc search button → SQL query với full filters
+   * 
+   * Backend endpoint: GET /api/events/search-smart?keyword=xxx
+   * 
+   * @param keyword - Search keyword
+   * @returns Promise<EventListDto[]> - Top 10 matching events
+   * 
+   * @example
+   * const suggestions = await eventService.searchSmart('blackp');
+   * // Returns: [{ id: 'xxx', name: 'BLACKPINK World Tour', ... }]
    */
-  async updateEvent(data: UpdateEventRequest): Promise<EventDetailDto> {
-    const formData = new FormData();
+  async searchSmart(keyword: string): Promise<EventListDto[]> {
+    if (!keyword || keyword.trim().length < 2) {
+      return []; // Không search nếu < 2 ký tự
+    }
 
-    Object.entries(data).forEach(([key, value]) => {
-      if (key === 'imageFile' || key === 'bannerFile') {
-        if (value) formData.append(key, value as File);
-      } else if (typeof value === 'object' && value !== null) {
-        formData.append(key, JSON.stringify(value));
-      } else if (value !== undefined && value !== null) {
-        formData.append(key, value.toString());
-      }
-    });
-
-    const response = await axiosClient.put<ApiResponse<EventDetailDto>>(
-      EVENT_ENDPOINTS.EVENT_DETAIL(data.eventId),
-      formData,
-      {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }
-    );
-    return response.data.data!;
-  },
-
-  /**
-   * Delete event (Organizer only)
-   */
-  async deleteEvent(eventId: string): Promise<void> {
-    await axiosClient.delete(EVENT_ENDPOINTS.EVENT_DETAIL(eventId));
-  },
-
-  /**
-   * Get my events (Organizer)
-   */
-  async getMyEvents(): Promise<EventListDto[]> {
-    const response = await axiosClient.get<ApiResponse<EventListDto[]>>(
-      EVENT_ENDPOINTS.MY_EVENTS
-    );
-    return response.data.data!;
+    try {
+      const response = await axiosClient.get<EventListDto[]>(
+        EVENT_ENDPOINTS.SEARCH_SMART,
+        {
+          params: { keyword: keyword.trim() }
+        }
+      );
+      
+      return response.data || [];
+    } catch (error) {
+      console.error('❌ Smart search failed:', error);
+      return []; // Return empty array nếu lỗi, không break UI
+    }
   },
 };

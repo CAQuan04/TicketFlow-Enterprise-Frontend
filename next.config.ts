@@ -69,13 +69,13 @@ const nextConfig: NextConfig = {
         protocol: 'http',
         hostname: 'localhost',
         port: '7207', // .NET Backend port
-        pathname: '/uploads/**', // Chỉ cho phép /uploads folder
+        pathname: '/**', // Allow all paths (user-content, uploads, etc.)
       },
       {
         protocol: 'https',
         hostname: 'localhost',
         port: '7207',
-        pathname: '/uploads/**',
+        pathname: '/**', // Allow all paths
       },
 
       // Ngrok tunnels (Testing với mobile/external)

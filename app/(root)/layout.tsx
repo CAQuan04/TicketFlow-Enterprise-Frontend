@@ -1,6 +1,4 @@
 import React from 'react';
-import { NavbarSimple } from '@/components/layout/navbar-simple';
-import { Footer } from '@/components/layout/footer';
 
 /**
  * ROOT LAYOUT - Customer Routes
@@ -100,18 +98,7 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <div className="flex min-h-screen flex-col">
-      {/* Navbar: Sticky header với auth state */}
-      <NavbarSimple />
-      
-      {/* Main Content: Grows to fill space, pushes footer down */}
-      <main className="flex-1">
-        {children}
-      </main>
-      
-      {/* Footer: Always at bottom */}
-      <Footer />
-    </div>
-  );
+  // Route group layout - Không cần duplicate navbar/footer
+  // Vì app/layout.tsx (global) đã có rồi
+  return <>{children}</>;
 }

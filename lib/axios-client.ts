@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { ApiErrorResponse } from '@/types';
 import { useAuthStore } from '@/store';
+import https from 'https';
 
 /**
  * Smart Axios Client với JWT Refresh Token Logic
@@ -10,6 +11,7 @@ import { useAuthStore } from '@/store';
  * - Auto-refresh khi 401 (token expired)
  * - Queue concurrent requests during refresh
  * - Auto-logout khi refresh token expired
+ * - Disable SSL verification cho development (self-signed cert)
  * 
  * Flow khi 401:
  * 1. Request A bị 401 → Trigger refresh
@@ -37,6 +39,11 @@ class AxiosClient {
       headers: {
         'Content-Type': 'application/json',
       },
+      // ⚠️ DEVELOPMENT ONLY: Disable SSL verification cho self-signed cert
+      // ❌ NEVER use in production!
+      httpsAgent: new https.Agent({
+        rejectUnauthorized: false, // Ignore self-signed certificate errors
+      }),
     });
 
     this.setupInterceptors();

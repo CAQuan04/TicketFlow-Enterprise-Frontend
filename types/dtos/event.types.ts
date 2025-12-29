@@ -1,29 +1,68 @@
 /**
  * Event DTOs
- * Mapped từ Backend: TicketBooking.Application.Features.Events
+ * ✅ Mapped chính xác từ Backend: TicketBooking.Application.Features.Events
+ * 
+ * Backend DTOs:
+ * - EventListDto: Dùng cho danh sách sự kiện (Home, Browse, Search)
+ * - EventDetailDto: Dùng cho chi tiết sự kiện
+ * - PagedResult<T>: Wrapper cho pagination
  */
 
 import { VenueDto } from './venue.types';
 
-// Event List DTO (cho trang Home/Browse)
+/**
+ * Event List DTO - Hiển thị trong danh sách
+ * Backend: EventListDto.cs
+ * 
+ * Fields mapping:
+ * - id → eventId (unique identifier)
+ * - name → title (event name)
+ * - description → description (short description)
+ * - startDateTime → startDateTime (ISO 8601 format)
+ * - endDateTime → endDateTime (ISO 8601 format)
+ * - venueName → venueName (display venue name)
+ * - coverImageUrl → coverImageUrl (main image URL)
+ * - minPrice → minPrice (lowest ticket price)
+ */
 export interface EventListDto {
-  eventId: string;
-  title: string;
-  description: string;
-  eventDate: string; // ISO DateTime
-  imageUrl: string;
-  categoryName: string;
+  id: string;
+  name: string;
+  description: string; // Short description
+  startDateTime: string; // ISO DateTime: "2024-01-15T19:00:00Z"
+  endDateTime: string; // ISO DateTime: "2024-01-15T23:00:00Z"
   venueName: string;
-  venueLocation: string;
-  organizerName: string;
+  coverImageUrl: string;
   minPrice: number;
-  maxPrice: number;
-  availableTickets: number;
-  totalTickets: number;
-  status: EventStatus;
-  isFeatured: boolean;
-  tags: string[];
+  
+  // Optional fields (có thể Backend trả thêm)
+  categoryName?: string;
+  organizerName?: string;
+  availableTickets?: number;
+  status?: EventStatus;
+  isFeatured?: boolean;
 }
+
+/**
+ * Paged Result - Pagination wrapper
+ * Backend: PagedResult<T>.cs
+ * 
+ * ⚠️ Quan trọng: Backend dùng "pageIndex" (không phải "page")
+ * pageIndex: 1-based (trang đầu tiên là 1)
+ */
+export interface PagedResult<T> {
+  items: T[];
+  pageIndex: number; // Current page (1-based)
+  totalPages: number; // Total number of pages
+  totalCount: number; // Total number of items
+  pageSize?: number; // Items per page
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
+}
+
+/**
+ * Alias cho backward compatibility
+ */
+export type PaginatedResponse<T> = PagedResult<T>;
 
 // Event Detail DTO (cho trang Event Detail)
 export interface EventDetailDto {
