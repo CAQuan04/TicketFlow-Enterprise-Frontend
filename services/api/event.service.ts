@@ -69,18 +69,46 @@ export const eventService = {
   },
 
   /**
-   * Get Event Detail by ID
+   * ============================================
+   * GET EVENT DETAIL BY ID (F4)
+   * ============================================
    * 
    * Backend endpoint: GET /api/events/{id}
    * 
+   * ⚠️ 404 Handling:
+   * - Nếu event không tồn tại → return null
+   * - Caller (page.tsx) sẽ gọi notFound() của Next.js
+   * 
+   * Why return null instead of throwing?
+   * - Next.js Server Component có thể dùng notFound() để show 404 page
+   * - Tránh unhandled error crashes
+   * 
    * @param eventId - Event ID
-   * @returns Promise<EventDetailDto>
+   * @returns Promise<EventDetailDto | null>
+   * 
+   * @example
+   * // Server Component (page.tsx)
+   * const event = await eventService.getEventById(params.id);
+   * if (!event) {
+   *   notFound(); // Next.js 404 page
+   * }
    */
-  async getEventById(eventId: string): Promise<EventDetailDto> {
-    const response = await axiosClient.get<EventDetailDto>(
-      EVENT_ENDPOINTS.EVENT_DETAIL(eventId)
-    );
-    return response.data;
+  async getEventById(eventId: string): Promise<EventDetailDto | null> {
+    try {
+      const response = await axiosClient.get<EventDetailDto>(
+        EVENT_ENDPOINTS.EVENT_DETAIL(eventId)
+      );
+      return response.data;
+    } catch (error: any) {
+      // Nếu 404: Event không tồn tại
+      if (error.response?.status === 404) {
+        console.warn(`⚠️ Event not found: ${eventId}`);
+        return null;
+      }
+      
+      // Các lỗi khác: throw để caller xử lý
+      throw error;
+    }
   },
 
   /**

@@ -266,23 +266,48 @@ export default function EventFilter({ onFiltersChange }: EventFilterProps) {
    */
   const handlePriceChange = useCallback(
     (type: 'min' | 'max', value: number | null) => {
-      const newRange: [number | null, number | null] = [...priceRange];
-      
-      if (type === 'min') {
-        newRange[0] = value;
-      } else {
-        newRange[1] = value;
-      }
-
-      setPriceRange(newRange);
-
-      // Chỉ apply khi cả 2 giá trị đều có
-      if (newRange[0] !== null && newRange[1] !== null) {
-        updateFilters({ priceRange: newRange as [number, number] });
-      }
+      setPriceRange((prev) => {
+        const newRange: [number | null, number | null] = [...prev];
+        
+        if (type === 'min') {
+          newRange[0] = value;
+        } else {
+          newRange[1] = value;
+        }
+        
+        return newRange;
+      });
+      // ⚠️ Don't auto-apply, wait for user to press Apply button
     },
-    [priceRange, updateFilters]
+    []
   );
+
+  /**
+   * ============================================
+   * HANDLE APPLY PRICE FILTER
+   * ============================================
+   */
+  const handleApplyPrice = useCallback(() => {
+    // Apply filter even if only one value is provided
+    if (priceRange[0] !== null || priceRange[1] !== null) {
+      const min = priceRange[0] !== null ? priceRange[0] : 0;
+      const max = priceRange[1] !== null ? priceRange[1] : 999999999;
+      updateFilters({ priceRange: [min, max] });
+    } else {
+      // Clear price filter
+      updateFilters({ priceRange: undefined });
+    }
+  }, [priceRange, updateFilters]);
+
+  /**
+   * ============================================
+   * HANDLE CLEAR PRICE FILTER
+   * ============================================
+   */
+  const handleClearPrice = useCallback(() => {
+    setPriceRange([null, null]);
+    updateFilters({ priceRange: undefined });
+  }, [updateFilters]);
 
   /**
    * ============================================
@@ -376,16 +401,17 @@ export default function EventFilter({ onFiltersChange }: EventFilterProps) {
             <span className="font-semibold text-gray-700">Giá vé (VNĐ)</span>
           </div>
           
-          <Space.Compact style={{ width: '100%' }}>
+          <div className="space-y-3">
             <InputNumber
               placeholder="Giá tối thiểu"
               value={priceRange[0]}
               onChange={(value) => handlePriceChange('min', value)}
               formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
               parser={value => Number(value!.replace(/\$\s?|(,*)/g, ''))}
-              style={{ width: '50%' }}
+              style={{ width: '100%' }}
               min={0}
               controls={false}
+              size="large"
             />
             <InputNumber
               placeholder="Giá tối đa"
@@ -393,19 +419,39 @@ export default function EventFilter({ onFiltersChange }: EventFilterProps) {
               onChange={(value) => handlePriceChange('max', value)}
               formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
               parser={value => Number(value!.replace(/\$\s?|(,*)/g, ''))}
-              style={{ width: '50%' }}
+              style={{ width: '100%' }}
               min={0}
               controls={false}
+              size="large"
             />
-          </Space.Compact>
 
-          {(priceRange[0] !== null || priceRange[1] !== null) && (
-            <div className="mt-2 text-xs text-gray-500">
-              {priceRange[0] !== null && `Từ ${priceRange[0].toLocaleString('vi-VN')}₫`}
-              {priceRange[0] !== null && priceRange[1] !== null && ' - '}
-              {priceRange[1] !== null && `đến ${priceRange[1].toLocaleString('vi-VN')}₫`}
+            <div className="flex gap-2">
+              <Button 
+                type="primary" 
+                onClick={handleApplyPrice}
+                disabled={priceRange[0] === null && priceRange[1] === null}
+                className="flex-1"
+              >
+                Áp dụng
+              </Button>
+              {(priceRange[0] !== null || priceRange[1] !== null) && (
+                <Button 
+                  onClick={handleClearPrice}
+                  className="flex-1"
+                >
+                  Xóa
+                </Button>
+              )}
             </div>
-          )}
+
+            {(priceRange[0] !== null || priceRange[1] !== null) && (
+              <div className="text-xs text-gray-500 text-center">
+                {priceRange[0] !== null && `Từ ${priceRange[0].toLocaleString('vi-VN')}₫`}
+                {priceRange[0] !== null && priceRange[1] !== null && ' - '}
+                {priceRange[1] !== null && `đến ${priceRange[1].toLocaleString('vi-VN')}₫`}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* TODO: Venue & Category Filters (Optional - add later if Backend supports) */}

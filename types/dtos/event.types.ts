@@ -4,25 +4,24 @@
  * 
  * Backend DTOs:
  * - EventListDto: Dùng cho danh sách sự kiện (Home, Browse, Search)
- * - EventDetailDto: Dùng cho chi tiết sự kiện
+ * - EventDetailDto: Dùng cho chi tiết sự kiện (F4 - FULL INFO)
+ * - TicketTypeDto: Chi tiết loại vé trong event detail
  * - PagedResult<T>: Wrapper cho pagination
  */
 
 import { VenueDto } from './venue.types';
 
 /**
- * Event List DTO - Hiển thị trong danh sách
+ * ============================================
+ * EVENT LIST DTO - Hiển thị trong danh sách
+ * ============================================
+ * 
  * Backend: EventListDto.cs
  * 
- * Fields mapping:
- * - id → eventId (unique identifier)
- * - name → title (event name)
- * - description → description (short description)
- * - startDateTime → startDateTime (ISO 8601 format)
- * - endDateTime → endDateTime (ISO 8601 format)
- * - venueName → venueName (display venue name)
- * - coverImageUrl → coverImageUrl (main image URL)
- * - minPrice → minPrice (lowest ticket price)
+ * Dùng cho:
+ * - Homepage featured events
+ * - Events browse page
+ * - Search results
  */
 export interface EventListDto {
   id: string;
@@ -34,7 +33,7 @@ export interface EventListDto {
   coverImageUrl: string;
   minPrice: number;
   
-  // Optional fields (có thể Backend trả thêm)
+  // Optional fields (Backend có thể trả thêm)
   categoryName?: string;
   organizerName?: string;
   availableTickets?: number;
@@ -43,7 +42,63 @@ export interface EventListDto {
 }
 
 /**
- * Paged Result - Pagination wrapper
+ * ============================================
+ * TICKET TYPE DTO - Chi tiết loại vé
+ * ============================================
+ * 
+ * Backend: TicketTypeDto.cs (trong EventDetailDto)
+ * 
+ * Dùng cho:
+ * - Event Detail Page (F4)
+ * - Booking Page
+ */
+export interface TicketTypeDto {
+  id: string;
+  name: string;
+  price: number;
+  originalPrice?: number; // Giá gốc (nếu có discount)
+  description?: string;   // Mô tả loại vé (VD: "Bao gồm đồ uống miễn phí")
+  availableQuantity: number; // Số lượng vé còn lại
+}
+
+/**
+ * ============================================
+ * EVENT DETAIL DTO - Chi tiết đầy đủ
+ * ============================================
+ * 
+ * Backend: EventDetailDto.cs
+ * 
+ * Dùng cho:
+ * - Event Detail Page (F4)
+ * - Booking Page
+ * 
+ * ⚠️ Khác với EventListDto:
+ * - Có đầy đủ thông tin venue (address, city)
+ * - Có ticketTypes array (để chọn vé)
+ * - Có description đầy đủ (long text)
+ */
+export interface EventDetailDto {
+  id: string;
+  name: string;
+  description: string; // Full description (có thể là HTML/Markdown)
+  startDateTime: string; // ISO DateTime
+  endDateTime: string;   // ISO DateTime
+  coverImageUrl: string | null; // Có thể null nếu không có ảnh
+  
+  // Venue Information
+  venueName: string;
+  venueAddress: string; // Địa chỉ đầy đủ
+  venueCity: string;    // Thành phố
+  
+  // Ticket Types (danh sách loại vé)
+  ticketTypes: TicketTypeDto[];
+}
+
+/**
+ * ============================================
+ * PAGED RESULT - Pagination wrapper
+ * ============================================
+ * 
  * Backend: PagedResult<T>.cs
  * 
  * ⚠️ Quan trọng: Backend dùng "pageIndex" (không phải "page")
@@ -60,52 +115,12 @@ export interface PagedResult<T> {
 }
 
 /**
- * Alias cho backward compatibility
+ * ============================================
+ * EVENT STATUS ENUM
+ * ============================================
+ * 
+ * Backend: EventStatus.cs (Enum)
  */
-export type PaginatedResponse<T> = PagedResult<T>;
-
-// Event Detail DTO (cho trang Event Detail)
-export interface EventDetailDto {
-  eventId: string;
-  title: string;
-  description: string;
-  longDescription?: string;
-  eventDate: string;
-  endDate?: string;
-  imageUrl: string;
-  bannerUrl?: string;
-  categoryId: string;
-  categoryName: string;
-  venue: VenueDto;
-  organizerId: string;
-  organizerName: string;
-  organizerLogo?: string;
-  organizerDescription?: string;
-  ticketTypes: TicketTypeDto[];
-  tags: string[];
-  status: EventStatus;
-  isFeatured: boolean;
-  capacity: number;
-  soldTickets: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Ticket Type (trong Event)
-export interface TicketTypeDto {
-  ticketTypeId: string;
-  name: string;
-  description?: string;
-  price: number;
-  quantity: number;
-  remainingQuantity: number;
-  maxPerOrder: number;
-  salesStartDate?: string;
-  salesEndDate?: string;
-  isActive: boolean;
-}
-
-// Event Status (từ Backend Enums)
 export enum EventStatus {
   Draft = "Draft",
   Published = "Published",
