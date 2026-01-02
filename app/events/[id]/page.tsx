@@ -26,17 +26,19 @@ import { notFound } from 'next/navigation';
 import { eventService } from '@/services/api/event.service';
 import EventHero from '@/components/events/detail/EventHero';
 import EventInfo from '@/components/events/detail/EventInfo';
-import TicketList from '@/components/events/detail/TicketList';
+import BookingWidget from '@/components/events/detail/BookingWidget';
 
 /**
  * ============================================
- * DYNAMIC PARAMS TYPE
+ * DYNAMIC PARAMS TYPE (NEXT.JS 15+)
  * ============================================
+ * 
+ * ⚠️ Next.js 15: params là Promise, phải await trước khi truy cập
  */
 interface EventDetailPageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 /**
@@ -64,14 +66,15 @@ interface EventDetailPageProps {
  * ⚠️ Next.js 15+: params is a Promise!
  * Must await before accessing properties
  * 
- * @param params - Route params (Promise<{ id: string }>)
+ * @param props - Props chứa params (Promise)
  * @returns Metadata object
  */
 export async function generateMetadata(
-  { params }: EventDetailPageProps
+  props: EventDetailPageProps
 ): Promise<Metadata> {
   // ⚠️ CRITICAL: Next.js 15+ - params is a Promise
-  const { id } = await params;
+  const params = await props.params;
+  const { id } = params;
 
   // Fetch event data (same call as page, Next.js will dedupe)
   const event = await eventService.getEventById(id);
@@ -156,13 +159,14 @@ export async function generateMetadata(
  * 1. Await params to get id
  * 2. Fetch event from Backend API
  * 3. If not found → Call notFound() (Next.js 404 page)
- * 4. Render Hero + Info + TicketList
+ * 4. Render Hero + Info + BookingWidget
  * 
- * @param params - Route params (Promise<{ id: string }>)
+ * @param props - Props chứa params (Promise)
  */
-export default async function EventDetailPage({ params }: EventDetailPageProps) {
+export default async function EventDetailPage(props: EventDetailPageProps) {
   // ⚠️ CRITICAL: Next.js 15+ - params is a Promise
-  const { id } = await params;
+  const params = await props.params;
+  const { id } = params;
 
   console.log('🔍 Fetching event detail:', id);
 
@@ -192,25 +196,30 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
    */
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Hero Section - Full width */}
+      {/* Hero Section - Full width với background blur */}
       <EventHero event={event} />
 
       {/* Content Container */}
-      <div className="container mx-auto px-4 py-12">
-        {/* 2-Column Layout: Info (Left) + Tickets (Right) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="container mx-auto px-4 py-8 md:py-12">
+        {/* 
+          Grid Layout: 
+          - Mobile: 1 cột (Widget ở dưới)
+          - Desktop: 3 cột (Info 2 cột + Widget 1 cột)
+        */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
           {/* LEFT: Event Info (2/3 width on desktop) */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 order-2 lg:order-1">
             <EventInfo event={event} />
           </div>
 
-          {/* RIGHT: Ticket List (1/3 width on desktop, sticky on scroll) */}
-          <div className="lg:col-span-1">
-            <div className="lg:sticky lg:top-24">
-              <TicketList 
-                ticketTypes={event.ticketTypes} 
-                eventName={event.name}
-              />
+          {/* RIGHT: Booking Widget (1/3 width on desktop, sticky) */}
+          <div className="lg:col-span-1 order-1 lg:order-2">
+            {/* 
+              Desktop: Sticky tại top-24 (dưới navbar)
+              Mobile: Inline, không sticky (dễ scroll)
+            */}
+            <div className="lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+              <BookingWidget event={event} />
             </div>
           </div>
         </div>

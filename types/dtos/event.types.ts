@@ -76,6 +76,7 @@ export interface TicketTypeDto {
  * - Có đầy đủ thông tin venue (address, city)
  * - Có ticketTypes array (để chọn vé)
  * - Có description đầy đủ (long text)
+ * - Có thông tin giới hạn mua vé và thời gian bán vé
  */
 export interface EventDetailDto {
   id: string;
@@ -89,6 +90,11 @@ export interface EventDetailDto {
   venueName: string;
   venueAddress: string; // Địa chỉ đầy đủ
   venueCity: string;    // Thành phố
+  
+  // Ticket Sale Configuration
+  maxTicketsPerUser: number; // Giới hạn số vé tối đa mỗi user có thể mua (0 = không giới hạn)
+  ticketSaleStartTime: string; // Thời gian bắt đầu bán vé (ISO DateTime)
+  ticketSaleEndTime?: string; // Thời gian kết thúc bán vé (ISO DateTime, optional)
   
   // Ticket Types (danh sách loại vé)
   ticketTypes: TicketTypeDto[];

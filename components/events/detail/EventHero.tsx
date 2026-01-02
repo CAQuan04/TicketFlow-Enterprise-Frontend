@@ -63,24 +63,44 @@ export default function EventHero({ event }: EventHeroProps) {
   const relativeTimeText = startDate.fromNow();
 
   return (
-    <div className="relative w-full h-[500px] md:h-[600px] overflow-hidden">
+    <div className="relative w-full h-[500px] md:h-[600px] overflow-hidden bg-gray-900">
       {/* Background Image với Blur Effect */}
-      {event.coverImageUrl && (
-        <div className="absolute inset-0">
-          <Image
-            src={getImageUrl(event.coverImageUrl)}
-            alt={event.name}
-            fill
-            className="object-cover"
-            style={{ filter: 'blur(20px) brightness(0.4)' }}
-            priority
-            unoptimized={process.env.NODE_ENV === 'development'}
-          />
-        </div>
+      {event.coverImageUrl ? (
+        <>
+          {/* Blurred Background Layer */}
+          <div className="absolute inset-0">
+            <Image
+              src={getImageUrl(event.coverImageUrl)}
+              alt={event.name}
+              fill
+              className="object-cover opacity-40"
+              style={{ filter: 'blur(30px)' }}
+              priority
+              unoptimized={process.env.NODE_ENV === 'development'}
+            />
+          </div>
+
+          {/* Sharp Image Layer (Center, scaled down) */}
+          <div className="absolute inset-0 flex items-center justify-center opacity-20">
+            <div className="relative w-full h-full max-w-2xl">
+              <Image
+                src={getImageUrl(event.coverImageUrl)}
+                alt={event.name}
+                fill
+                className="object-contain"
+                priority
+                unoptimized={process.env.NODE_ENV === 'development'}
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Fallback gradient nếu không có ảnh */
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900" />
       )}
 
-      {/* Gradient Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent" />
+      {/* Gradient Overlay cho text dễ đọc */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-black/30" />
 
       {/* Content */}
       <div className="relative h-full container mx-auto px-4">
