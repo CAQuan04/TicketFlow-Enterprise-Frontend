@@ -25,6 +25,8 @@ const PAYMENT_ENDPOINTS = {
   PAYMENT_DETAIL: (id: string) => `/payments/${id}`,
   PAYMENT_CALLBACK: '/payments/callback',
   PAYMENT_STATUS: (id: string) => `/payments/${id}/status`,
+  PAY_WITH_WALLET: (orderId: string) => `/orders/${orderId}/pay`, // Wallet payment
+  VNPAY_DEPOSIT: '/payments/deposit', // VNPay deposit
 };
 
 const WALLET_ENDPOINTS = {
@@ -79,6 +81,37 @@ export const orderService = {
 };
 
 export const paymentService = {
+  /**
+   * Pay order with wallet
+   * 
+   * POST /api/orders/{orderId}/pay
+   * 
+   * @param orderId - Order ID
+   * @returns Payment details
+   */
+  async payWithWallet(orderId: string): Promise<PaymentDto> {
+    const response = await axiosClient.post<ApiResponse<PaymentDto>>(
+      PAYMENT_ENDPOINTS.PAY_WITH_WALLET(orderId)
+    );
+    return response.data.data!;
+  },
+
+  /**
+   * Initiate VNPay deposit
+   * 
+   * POST /api/payments/deposit
+   * 
+   * @param amount - Amount to deposit (VND)
+   * @returns VNPay payment URL
+   */
+  async initiateVNPayDeposit(amount: number): Promise<{ paymentUrl: string }> {
+    const response = await axiosClient.post<ApiResponse<{ paymentUrl: string }>>(
+      PAYMENT_ENDPOINTS.VNPAY_DEPOSIT,
+      { amount }
+    );
+    return response.data.data!;
+  },
+
   /**
    * Get payment detail
    */

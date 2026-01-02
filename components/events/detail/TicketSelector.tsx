@@ -18,6 +18,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button, Card, Tag, message } from 'antd';
 import { 
   PlusOutlined, 
@@ -27,6 +28,7 @@ import {
   WarningOutlined
 } from '@ant-design/icons';
 import { EventDetailDto, TicketTypeDto } from '@/types';
+import { useBookingStore } from '@/store';
 
 interface TicketSelectorProps {
   event: EventDetailDto;
@@ -53,6 +55,9 @@ const calculateDiscount = (price: number, originalPrice?: number): string | null
 };
 
 export default function TicketSelector({ event, onCheckout }: TicketSelectorProps) {
+  const router = useRouter();
+  const { addItem } = useBookingStore();
+  
   // State: Record<ticketTypeId, quantity>
   const [selections, setSelections] = useState<Record<string, number>>({});
 
@@ -150,7 +155,27 @@ export default function TicketSelector({ event, onCheckout }: TicketSelectorProp
       return;
     }
 
-    console.log('🛒 Proceeding to checkout:', {
+    // Thêm các items vào booking store
+    Object.entries(selections).forEach(([ticketTypeId, quantity]) => {
+      if (quantity > 0) {
+        const ticket = event.ticketTypes.find(t => t.id === ticketTypeId);
+        if (ticket) {
+          addItem({
+            ticketTypeId: ticket.id,
+            ticketTypeName: ticket.name,
+            quantity,
+            price: ticket.price,
+            eventId: event.id,
+            eventName: event.name,
+            eventDate: event.startDateTime,
+            eventVenue: event.venueName,
+            eventCoverImage: event.coverImageUrl || undefined,
+          });
+        }
+      }
+    });
+
+    console.log('🛒 Added to booking:', {
       eventId: event.id,
       eventName: event.name,
       selections,
@@ -162,8 +187,12 @@ export default function TicketSelector({ event, onCheckout }: TicketSelectorProp
       onCheckout(selections);
     }
 
-    // Hiện thông báo thành công
-    message.success('Đang chuyển đến trang thanh toán...');
+    // Chuyển đến trang checkout
+    message.success('Đã thêm vào giỏ hàng. Đang chuyển đến trang thanh toán...');
+    
+    setTimeout(() => {
+      router.push('/booking');
+    }, 500);
   };
 
   return (
