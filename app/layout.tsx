@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/providers";
-import { NavbarSimple } from "@/components/layout/navbar-simple";
+import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/shared/footer";
 import "./globals.css";
 
@@ -33,7 +33,7 @@ export default function RootLayout({
       >
         <Providers>
           <div className="flex min-h-screen flex-col">
-            <NavbarSimple />
+            <Navbar />
             <main className="flex-1">{children}</main>
             <Footer />
           </div>

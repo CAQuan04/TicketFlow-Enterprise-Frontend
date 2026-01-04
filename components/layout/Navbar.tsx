@@ -12,8 +12,10 @@ import {
   UserCircle,
   Menu,
   X,
+  Wallet,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
+import { walletService } from '@/services/api';
 import toast from 'react-hot-toast';
 
 /**
@@ -151,12 +153,40 @@ export function Navbar() {
    */
   const [mounted, setMounted] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [loadingWallet, setLoadingWallet] = useState(false);
 
   useEffect(() => {
     // This is intentional for hydration fix - not a side effect
     // Server renders skeleton, client mounts and updates to real content
     setMounted(true);
   }, []);
+
+  /**
+   * Fetch Wallet Balance khi user đăng nhập
+   */
+  useEffect(() => {
+    const fetchWalletBalance = async () => {
+      if (!mounted || !isAuthenticated) {
+        setWalletBalance(null);
+        return;
+      }
+
+      try {
+        setLoadingWallet(true);
+        const wallet = await walletService.getMyWallet();
+        setWalletBalance(wallet.balance);
+        console.log('💰 Wallet balance loaded:', wallet.balance);
+      } catch (error) {
+        console.error('❌ Failed to fetch wallet balance:', error);
+        setWalletBalance(0);
+      } finally {
+        setLoadingWallet(false);
+      }
+    };
+
+    fetchWalletBalance();
+  }, [mounted, isAuthenticated]);
 
   /**
    * Handle Logout
@@ -182,11 +212,45 @@ export function Navbar() {
    * 
    * Dynamic based on user role
    */
+  /**
+   * Format currency VND
+   */
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+    }).format(amount);
+  };
+
   const menuItems: MenuProps['items'] = [
+    {
+      key: 'wallet',
+      label: (
+        <div className="px-2 py-1 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+          <div className="flex items-center gap-2 text-gray-600 text-xs mb-1">
+            <Wallet className="h-3 w-3" />
+            Số dư ví
+          </div>
+          <div className="text-lg font-bold text-blue-600">
+            {loadingWallet ? (
+              <span className="text-sm text-gray-400">Đang tải...</span>
+            ) : walletBalance !== null ? (
+              formatCurrency(walletBalance)
+            ) : (
+              <span className="text-sm text-gray-400">--</span>
+            )}
+          </div>
+        </div>
+      ),
+      disabled: true,
+    },
+    {
+      type: 'divider' as const,
+    },
     {
       key: 'tickets',
       label: (
-        <Link href="/booking/my-tickets" className="flex items-center gap-2">
+        <Link href="/my-tickets" className="flex items-center gap-2">
           <Ticket className="h-4 w-4" />
           Vé của tôi
         </Link>
@@ -253,7 +317,7 @@ export function Navbar() {
   ];
 
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/80 backdrop-blur-md">
+    <nav className="z-50 w-full border-b border-gray-200 bg-white shadow-sm">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}

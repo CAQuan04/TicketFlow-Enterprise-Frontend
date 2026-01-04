@@ -6,7 +6,7 @@
 // Order Creation
 export interface CreateOrderRequest {
   eventId: string;
-  tickets: OrderTicketItem[];
+  items: OrderTicketItem[];  // ✅ Backend expect 'items' (camelCase - viết thường chữ i)
   paymentMethod: PaymentMethod;
   useWallet?: boolean;
   walletAmount?: number;
@@ -98,6 +98,21 @@ export interface PaymentDto {
   paymentUrl?: string;
   createdAt: string;
   completedAt?: string;
+}
+
+/**
+ * VNPay Payment Response Types
+ */
+export interface PaymentUrlResponse {
+  paymentUrl: string; // VNPay URL trả về từ Backend
+}
+
+export interface VnPayIpnResponse {
+  rspCode: string;   // Response code từ VNPay (00 = success)
+  message: string;    // Message mô tả kết quả
+  orderId?: string;   // Order ID nếu thành công
+  amount?: number;    // Số tiền đã thanh toán
+  transactionId?: string; // Transaction ID từ VNPay
 }
 
 // Wallet

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ConfigProvider, theme as antdTheme } from 'antd';
+import { ConfigProvider, theme as antdTheme, App } from 'antd';
 import viVN from 'antd/locale/vi_VN';
 import dayjs from 'dayjs';
 import 'dayjs/locale/vi';
@@ -13,6 +13,8 @@ import 'dayjs/locale/vi';
  * - Theme colors map với Tailwind CSS
  * - Locale: Tiếng Việt
  * - DayJS locale: Tiếng Việt
+ * - App component: Để sử dụng static methods (message, notification, modal)
+ *   mà không bị warning về context
  */
 
 // Set dayjs locale globally
@@ -73,7 +75,10 @@ export function AntdProvider({ children }: AntdProviderProps) {
         },
       }}
     >
-      {children}
+      {/* App component để support static methods (message, notification, modal) */}
+      <App>
+        {children}
+      </App>
     </ConfigProvider>
   );
 }

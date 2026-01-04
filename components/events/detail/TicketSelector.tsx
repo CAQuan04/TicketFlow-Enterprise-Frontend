@@ -19,7 +19,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card, Tag, message } from 'antd';
+import { Button, Card, Tag, App } from 'antd';
 import { 
   PlusOutlined, 
   MinusOutlined, 
@@ -57,6 +57,7 @@ const calculateDiscount = (price: number, originalPrice?: number): string | null
 export default function TicketSelector({ event, onCheckout }: TicketSelectorProps) {
   const router = useRouter();
   const { addItem } = useBookingStore();
+  const { message } = App.useApp(); // Lấy message từ context
   
   // State: Record<ticketTypeId, quantity>
   const [selections, setSelections] = useState<Record<string, number>>({});

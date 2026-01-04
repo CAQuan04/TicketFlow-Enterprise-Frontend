@@ -15,6 +15,9 @@ export * from './dtos/venue.types';
 // Order & Payment Types
 export * from './dtos/order.types';
 
+// Ticket Types
+export * from './dtos/ticket.types';
+
 // Common API Response Types
 export interface ApiResponse<T = any> {
   success: boolean;

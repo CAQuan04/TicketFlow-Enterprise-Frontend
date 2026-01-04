@@ -34,7 +34,9 @@ import {
   Tag, 
   Modal, 
   Spin,
-  message
+  Radio,
+  Alert,
+  Space
 } from 'antd';
 import {
   ShoppingCartOutlined,
@@ -45,12 +47,18 @@ import {
   WalletOutlined,
   ExclamationCircleOutlined,
   CheckCircleOutlined,
-  LoadingOutlined
+  LoadingOutlined,
+  BankOutlined,
+  CreditCardOutlined,
+  PlusOutlined,
+  MinusOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
+import toast from 'react-hot-toast';
 import dayjs from 'dayjs';
 import 'dayjs/locale/vi';
 import { useBookingStore, useAuthStore } from '@/store';
-import { orderService, paymentService } from '@/services/api';
+import { orderService, paymentService, walletService } from '@/services/api';
 import { getImageUrl } from '@/lib/utils';
 import { PaymentMethod } from '@/types';
 
@@ -70,11 +78,15 @@ export default function CheckoutPage() {
   const router = useRouter();
   
   // Store state
-  const { items, getTotalAmount, getTotalQuantity, isValidBooking, clearBooking } = useBookingStore();
-  const { user } = useAuthStore();
+  const { items, getTotalAmount, getTotalQuantity, isValidBooking, clearBooking, updateQuantity, removeItem } = useBookingStore();
+  const { user, isAuthenticated } = useAuthStore();
   
   // Component state
+  const [mounted, setMounted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'WALLET' | 'VNPAY'>('WALLET');
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [loadingWallet, setLoadingWallet] = useState(true);
   const [errorModal, setErrorModal] = useState<{
     visible: boolean;
     title: string;
@@ -87,99 +99,289 @@ export default function CheckoutPage() {
 
   /**
    * ============================================
+   * HYDRATION & AUTHENTICATION CHECK
+   * ============================================
+   */
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  /**
+   * ============================================
+   * REDIRECT IF NOT AUTHENTICATED
+   * ============================================
+   */
+  useEffect(() => {
+    if (mounted && !isAuthenticated) {
+      toast.error('Vui lòng đăng nhập để tiếp tục');
+      router.push('/login?returnUrl=/booking');
+    }
+  }, [mounted, isAuthenticated, router]);
+
+  /**
+   * ============================================
    * REDIRECT IF EMPTY CART
    * ============================================
    */
   useEffect(() => {
-    if (items.length === 0 || !isValidBooking()) {
-      message.warning('Giỏ hàng trống. Vui lòng chọn vé trước.');
+    if (mounted && (items.length === 0 || !isValidBooking())) {
+      toast.error('Giỏ hàng trống. Vui lòng chọn vé trước.');
       router.push('/events');
     }
-  }, [items, isValidBooking, router]);
+  }, [mounted, items, isValidBooking, router]);
 
   /**
-   * Nếu chưa login → Redirect to login
+   * ============================================
+   * FETCH WALLET BALANCE
+   * ============================================
    */
+
   useEffect(() => {
-    if (!user) {
-      message.warning('Vui lòng đăng nhập để tiếp tục');
-      router.push('/login?redirect=/booking');
-    }
-  }, [user, router]);
+    const fetchWallet = async () => {
+      if (!mounted || !isAuthenticated) return;
+
+      try {
+        setLoadingWallet(true);
+        const response = await walletService.getMyWallet();
+        
+        // Backend /wallets/balance có thể trả về:
+        // 1. Trực tiếp number: 50000
+        // 2. Object: { balance: 50000 }
+        // 3. WalletDto: { walletId, userId, balance, ... }
+        const balance = typeof response === 'number' 
+          ? response 
+          : (response as any)?.balance ?? 0;
+        
+        setWalletBalance(balance);
+      } catch (err: any) {
+        // Nếu API 404 (chưa có wallet) → set balance 0 (bình thường cho user mới)
+        // 404 = User chưa có wallet record trong database, KHÔNG phải vì không có tiền
+        // Wallet có balance = 0 vẫn trả về 200 OK
+        const status = err?.response?.status;
+        
+        if (status !== 404) {
+          // Chỉ log các lỗi khác 404 (500, 401, network error, etc.)
+          console.error('❌ Wallet API error:', status, err?.message);
+        }
+        
+        setWalletBalance(0);
+      } finally {
+        setLoadingWallet(false);
+      }
+    };
+
+    fetchWallet();
+  }, [mounted, isAuthenticated]);
 
   /**
    * ============================================
    * HANDLE PAYMENT
    * ============================================
    * 
-   * Step 1: Create Order
-   * Step 2: Pay with Wallet
-   * Step 3: Success → Clear booking → Redirect
+   * FLOW:
+   * 1. Validate payment method và số dư ví (nếu dùng Wallet)
+   * 2. Create Order với backend (POST /api/order)
+   * 3. Nếu payment method = WALLET → gọi payWithWallet API
+   * 4. Nếu payment method = VNPAY → redirect đến VNPay URL
+   * 5. Clear booking store và redirect đến success page
+   * 
+   * ERROR HANDLING:
+   * - 409 Conflict: Vé đã bán hết (race condition - nhiều người mua cùng lúc)
+   * - 400 Bad Request: Vượt quá giới hạn mua vé hoặc số dư không đủ
+   * - 500 Server Error: Lỗi hệ thống
+   * 
+   * RACE CONDITION SCENARIO:
+   * - Nếu Order được tạo (status = Pending) nhưng Payment thất bại
+   * - User sẽ thấy Order trong "My Orders" với trạng thái "Pending"
+   * - User có thể "Retry Payment" từ trang đó
    */
   const handlePayment = async () => {
     if (!user) {
-      message.error('Vui lòng đăng nhập');
+      toast.error('Vui lòng đăng nhập');
       return;
+    }
+
+    // Validate wallet balance if using wallet
+    if (paymentMethod === 'WALLET') {
+      if (walletBalance === null || walletBalance < getTotalAmount()) {
+        toast.error('Số dư ví không đủ. Vui lòng chọn phương thức thanh toán khác.');
+        return;
+      }
     }
 
     setIsLoading(true);
 
     try {
       /**
-       * STEP 1: CREATE ORDER
+       * ========================================
+       * STEP 1: CREATE ORDER (with toast.promise)
+       * ========================================
        */
-      console.log('📦 Creating order...', {
+      const orderPayload = {
         eventId: items[0].eventId,
-        tickets: items.map(item => ({
+        items: items.map(item => ({  // ✅ Backend expect 'items' (camelCase - viết thường chữ i)
           ticketTypeId: item.ticketTypeId,
           quantity: item.quantity,
         })),
-      });
-
-      const order = await orderService.createOrder({
-        eventId: items[0].eventId,
-        tickets: items.map(item => ({
-          ticketTypeId: item.ticketTypeId,
-          quantity: item.quantity,
-        })),
-        paymentMethod: PaymentMethod.Wallet,
-      });
-
-      console.log('✅ Order created:', order.orderId);
-
-      /**
-       * STEP 2: PAY WITH WALLET
-       */
-      console.log('💳 Processing payment...');
-
-      const payment = await paymentService.payWithWallet(order.orderId);
-
-      console.log('✅ Payment successful:', payment.paymentId);
-
-      /**
-       * STEP 3: SUCCESS
-       */
-      message.success('Thanh toán thành công!');
+        paymentMethod: paymentMethod === 'WALLET' ? PaymentMethod.Wallet : PaymentMethod.VNPay,
+      };
       
-      // Clear booking
-      clearBooking();
+      console.log('📦 Creating order with payload:', JSON.stringify(orderPayload, null, 2));
+      
+      const createOrderPromise = orderService.createOrder(orderPayload);
 
-      // Redirect to success page
-      setTimeout(() => {
-        router.push(`/success?orderId=${order.orderId}`);
-      }, 500);
+      const order = await toast.promise(
+        createOrderPromise,
+        {
+          loading: 'Đang tạo đơn hàng...',
+          success: 'Đơn hàng đã được tạo thành công! 🎫',
+          error: (err) => {
+            // 409 Conflict: Vé đã bán hết (race condition)
+            if (err.response?.status === 409) {
+              return 'Vé đã bán hết! Vui lòng chọn loại vé khác. 😢';
+            }
+            // 400 Bad Request: Vượt giới hạn hoặc invalid payload
+            if (err.response?.status === 400) {
+              const errorMsg = err.response?.data?.message || err.response?.data?.title;
+              return errorMsg || 'Vượt quá giới hạn mua vé cho sự kiện này.';
+            }
+            // Generic error
+            return 'Không thể tạo đơn hàng. Vui lòng thử lại.';
+          },
+        }
+      );
+
+      // Backend trả về OrderDto, cần extract orderId
+      console.log('🔍 Order object received:', order);
+      console.log('🔍 Order keys:', order ? Object.keys(order) : 'null');
+      
+      const orderId = order?.orderId || order?.id;
+      if (!orderId) {
+        console.error('❌ Cannot find orderId. Order object:', order);
+        throw new Error('Order ID not found in response');
+      }
+      
+      console.log('✅ Order created:', orderId);
+
+      /**
+       * ========================================
+       * STEP 2: PROCESS PAYMENT
+       * ========================================
+       */
+      if (paymentMethod === 'WALLET') {
+        // ===== WALLET PAYMENT =====
+        const paymentPromise = paymentService.payWithWallet(orderId);
+
+        await toast.promise(
+          paymentPromise,
+          {
+            loading: 'Đang xử lý thanh toán từ ví... 💳',
+            success: 'Thanh toán thành công! Vé đã được gửi tới email 🎉',
+            error: (err) => {
+              // 400/500: Insufficient funds hoặc server error
+              if (err.response?.status === 400 || err.response?.status === 500) {
+                return 'Số dư ví không đủ hoặc có lỗi xảy ra. Đơn hàng đã được tạo, bạn có thể thanh toán lại sau trong "My Orders".';
+              }
+              return 'Thanh toán thất bại. Vui lòng thử lại.';
+            },
+          }
+        );
+
+        console.log('✅ Payment successful for order:', orderId);
+
+        /**
+         * STEP 3: CLEAR BOOKING & REDIRECT TO MY TICKETS
+         */
+        clearBooking();
+
+        setTimeout(() => {
+          router.push('/my-tickets');
+        }, 1000);
+
+      } else {
+        // ===== VNPAY PAYMENT =====
+        // Redirect đến trang /payment/[id] để user chọn phương thức thanh toán
+        // Trang đó sẽ xử lý cả Wallet và VNPay
+        console.log('🔀 Redirecting to payment page:', orderId);
+        
+        // Không clear booking ngay, để user có thể quay lại
+        router.push(`/payment/${orderId}`);
+      }
 
     } catch (error: unknown) {
       console.error('❌ Payment error:', error);
 
       // Parse error message with type guard
-      const errorData = error as { response?: { data?: { title?: string; message?: string } }; message?: string };
+      const errorData = error as { response?: { data?: { title?: string; message?: string; errors?: any }; status?: number }; message?: string };
+      
+      // ============================================
+      // 🚨 HIỂN THỊ LỖI BUSINESSRULE LÊN MÀN HÌNH
+      // ============================================
+      if (errorData.response?.data?.errors) {
+        const backendErrors = errorData.response.data.errors;
+        
+        // 1. Kiểm tra lỗi nghiệp vụ (BusinessRule)
+        if (backendErrors.BusinessRule && Array.isArray(backendErrors.BusinessRule)) {
+          console.error('🚨 BusinessRule Errors:', backendErrors.BusinessRule);
+          
+          // Lấy thông báo đầu tiên và hiển thị toast
+          const businessRuleMessage = backendErrors.BusinessRule[0];
+          toast.error(businessRuleMessage, {
+            duration: 5000,
+            icon: '🚨',
+          });
+          
+          // Log tất cả lỗi ra console để debug
+          backendErrors.BusinessRule.forEach((rule: string, index: number) => {
+            console.error(`  ${index + 1}. ${rule}`);
+          });
+          
+          return; // Dừng lại, không hiện modal chung chung
+        }
+        
+        // 2. Kiểm tra các lỗi Validation khác (Ví dụ: Quantity < 0, EventId invalid)
+        const firstErrorKey = Object.keys(backendErrors)[0];
+        if (firstErrorKey) {
+          const firstErrorMessage = Array.isArray(backendErrors[firstErrorKey])
+            ? backendErrors[firstErrorKey][0]
+            : backendErrors[firstErrorKey];
+          
+          toast.error(`${firstErrorKey}: ${firstErrorMessage}`, {
+            duration: 5000,
+          });
+          
+          console.error(`❌ Validation Error (${firstErrorKey}):`, firstErrorMessage);
+          return;
+        }
+      }
+      
+      // Log chi tiết để debug (giữ nguyên)
+      if (errorData.response?.status === 400) {
+        console.error('❌ 400 Bad Request Details:');
+        console.error('Status:', errorData.response.status);
+        console.error('Title:', errorData.response.data?.title);
+        console.error('Message:', errorData.response.data?.message);
+        console.error('Errors:', JSON.stringify(errorData.response.data?.errors, null, 2));
+        console.error('Full Response:', JSON.stringify(errorData.response.data, null, 2));
+      }
+      
       const errorMessage = errorData.response?.data?.title || 
                           errorData.response?.data?.message || 
                           errorData.message ||
                           'Đã xảy ra lỗi khi thanh toán';
 
-      // Specific error cases
+      // Handle 409 Conflict (sold out) - redirect back to event page
+      if (errorData.response?.status === 409 && items[0]?.eventId) {
+        toast.error('Vé đã bán hết! Đang chuyển về trang sự kiện...', {
+          icon: '😢',
+        });
+        setTimeout(() => {
+          router.push(`/events/${items[0].eventId}`);
+        }, 2000);
+        return;
+      }
+
+      // Specific error cases with modal (giữ nguyên)
       if (errorMessage.includes('not enough') || errorMessage.includes('insufficient')) {
         setErrorModal({
           visible: true,
@@ -199,6 +401,7 @@ export default function CheckoutPage() {
           message: 'Số dư ví của bạn không đủ để thanh toán. Vui lòng nạp thêm tiền.',
         });
       } else {
+        // Fallback: Hiện modal chung chung nếu không match case nào
         setErrorModal({
           visible: true,
           title: 'Lỗi thanh toán',
@@ -230,13 +433,16 @@ export default function CheckoutPage() {
 
   /**
    * ============================================
-   * RENDER LOADING
+   * RENDER LOADING STATE (HYDRATION)
    * ============================================
    */
-  if (items.length === 0 || !user) {
+  if (!mounted || items.length === 0 || !user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Spin size="large" />
+        <div className="text-center">
+          <Spin size="large" />
+          <div className="mt-4 text-gray-600">Đang tải...</div>
+        </div>
       </div>
     );
   }
@@ -245,6 +451,9 @@ export default function CheckoutPage() {
   const eventInfo = items[0];
   const totalAmount = getTotalAmount();
   const totalQuantity = getTotalQuantity();
+  
+  // Check if wallet has sufficient balance
+  const hasInsufficientBalance = walletBalance !== null && walletBalance < totalAmount;
 
   /**
    * ============================================
@@ -258,202 +467,331 @@ export default function CheckoutPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             <ShoppingCartOutlined className="mr-3" />
-            Thanh toán
+            Xác nhận đặt vé
           </h1>
           <div className="text-gray-600">
-            Hoàn tất đơn hàng của bạn
+            Kiểm tra thông tin và hoàn tất thanh toán
           </div>
         </div>
 
-        {/* Main Grid: Left (Order Summary) + Right (Payment) */}
+        {/* Main Grid: Left (Customer + Payment) + Right (Order Summary) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
           
           {/* ============================================
-              LEFT COLUMN: ORDER SUMMARY
+              LEFT COLUMN: CUSTOMER INFO + PAYMENT METHOD
               ============================================ */}
           <div className="lg:col-span-2 space-y-6">
             
-            {/* Event Info Card */}
-            <Card className="shadow-md">
-              <div className="flex gap-4">
-                {/* Event Image */}
-                {eventInfo.eventCoverImage && (
-                  <div className="relative w-32 h-32 flex-shrink-0 rounded-lg overflow-hidden">
-                    <Image
-                      src={getImageUrl(eventInfo.eventCoverImage)}
-                      alt={eventInfo.eventName}
-                      fill
-                      className="object-cover"
-                      unoptimized={process.env.NODE_ENV === 'development'}
-                    />
-                  </div>
-                )}
-
-                {/* Event Details */}
-                <div className="flex-1">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-3">
-                    {eventInfo.eventName}
-                  </h2>
-                  
-                  <div className="space-y-2 text-sm text-gray-600">
-                    <div className="flex items-center gap-2">
-                      <CalendarOutlined className="text-blue-600" />
-                      <span>{dayjs(eventInfo.eventDate).format('dddd, DD/MM/YYYY HH:mm')}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <EnvironmentOutlined className="text-red-600" />
-                      <span>{eventInfo.eventVenue}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            {/* Items List Card */}
+            {/* Customer Info Card */}
             <Card 
               title={
                 <div className="flex items-center gap-2">
-                  <ShoppingCartOutlined />
-                  <span>Chi tiết đơn hàng</span>
-                  <Tag color="blue">{totalQuantity} vé</Tag>
+                  <UserOutlined />
+                  <span>Thông tin khách hàng</span>
                 </div>
               }
               className="shadow-md"
             >
               <div className="space-y-4">
-                {items.map((item, index) => (
-                  <div key={item.ticketTypeId}>
-                    {index > 0 && <Divider className="my-4" />}
-                    
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="font-semibold text-gray-900 text-lg">
-                          {item.ticketTypeName}
-                        </div>
-                        <div className="text-sm text-gray-500 mt-1">
-                          {formatCurrency(item.price)} x {item.quantity}
-                        </div>
-                      </div>
-                      
-                      <div className="text-right">
-                        <div className="text-xl font-bold text-gray-900">
-                          {formatCurrency(item.price * item.quantity)}
-                        </div>
-                      </div>
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Họ và tên</div>
+                    <div className="font-semibold text-gray-900">{user.fullName}</div>
                   </div>
-                ))}
-
-                {/* Total */}
-                <Divider className="my-6 border-t-2" />
-                <div className="flex items-center justify-between">
-                  <span className="text-lg font-semibold text-gray-900">
-                    Tổng cộng:
-                  </span>
-                  <span className="text-3xl font-bold text-red-600">
-                    {formatCurrency(totalAmount)}
-                  </span>
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Email</div>
+                    <div className="font-semibold text-gray-900">{user.email}</div>
+                  </div>
                 </div>
+                
+                <Alert
+                  title="Vé điện tử sẽ được gửi đến email của bạn"
+                  type="info"
+                  showIcon
+                  icon={<MailOutlined />}
+                />
               </div>
+            </Card>
+
+            {/* Payment Method Card */}
+            <Card 
+              title={
+                <div className="flex items-center gap-2">
+                  <CreditCardOutlined />
+                  <span>Phương thức thanh toán</span>
+                </div>
+              }
+              className="shadow-md"
+            >
+              <Radio.Group 
+                value={paymentMethod} 
+                onChange={(e) => setPaymentMethod(e.target.value)}
+                className="w-full"
+              >
+                <Space orientation="vertical" className="w-full" size="middle">
+                  {/* Wallet Option */}
+                  <div 
+                    className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                      paymentMethod === 'WALLET' 
+                        ? 'border-blue-500 bg-blue-50' 
+                        : 'border-gray-200 hover:border-blue-300'
+                    } ${hasInsufficientBalance ? 'opacity-60' : ''}`}
+                    onClick={() => !hasInsufficientBalance && setPaymentMethod('WALLET')}
+                  >
+                    <Radio value="WALLET" disabled={hasInsufficientBalance}>
+                      <div className="flex items-start gap-3 ml-2">
+                        <WalletOutlined className="text-2xl text-blue-600 mt-1" />
+                        <div className="flex-1">
+                          <div className="font-semibold text-gray-900 text-base">
+                            Ví TicketFlow
+                          </div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            Thanh toán nhanh và an toàn với ví nội bộ
+                          </div>
+                          {loadingWallet ? (
+                            <div className="text-sm text-gray-500 mt-2">
+                              <Spin size="small" /> Đang tải số dư...
+                            </div>
+                          ) : (
+                            <div className="mt-2">
+                              <div className="text-sm">
+                                <span className="text-gray-600">Số dư hiện tại: </span>
+                                <span className="font-semibold text-green-600">
+                                  {formatCurrency(walletBalance || 0)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Radio>
+                    
+                    {/* Insufficient Balance Warning */}
+                    {hasInsufficientBalance && (
+                      <Alert
+                        title="Số dư không đủ. Vui lòng nạp thêm tiền hoặc chọn phương thức khác."
+                        type="error"
+                        showIcon
+                        className="mt-3 ml-8"
+                      />
+                    )}
+                  </div>
+
+                  {/* VNPay Option */}
+                  <div 
+                    className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                      paymentMethod === 'VNPAY' 
+                        ? 'border-blue-500 bg-blue-50' 
+                        : 'border-gray-200 hover:border-blue-300'
+                    }`}
+                    onClick={() => setPaymentMethod('VNPAY')}
+                  >
+                    <Radio value="VNPAY">
+                      <div className="flex items-start gap-3 ml-2">
+                        <BankOutlined className="text-2xl text-red-600 mt-1" />
+                        <div className="flex-1">
+                          <div className="font-semibold text-gray-900 text-base">
+                            Cổng thanh toán VNPay
+                          </div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            Thanh toán qua thẻ ATM, thẻ tín dụng, ví điện tử
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <Tag color="blue">ATM</Tag>
+                            <Tag color="green">Visa/Master</Tag>
+                            <Tag color="orange">QR Code</Tag>
+                          </div>
+                        </div>
+                      </div>
+                    </Radio>
+                  </div>
+                </Space>
+              </Radio.Group>
             </Card>
           </div>
 
           {/* ============================================
-              RIGHT COLUMN: PAYMENT INFO
+              RIGHT COLUMN: ORDER SUMMARY (STICKY)
               ============================================ */}
-          <div className="lg:col-span-1 space-y-6">
-            
-            {/* User Info Card */}
-            <Card 
-              title="Thông tin người mua"
-              className="shadow-md"
-            >
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center gap-3">
-                  <UserOutlined className="text-blue-600" />
-                  <span className="font-medium">{user.fullName}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <MailOutlined className="text-blue-600" />
-                  <span className="text-gray-600">{user.email}</span>
-                </div>
-              </div>
-            </Card>
-
-            {/* Payment Action Card */}
-            <Card 
-              title="Phương thức thanh toán"
-              className="shadow-md"
-            >
-              <div className="space-y-4">
-                {/* Payment Method */}
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <WalletOutlined className="text-2xl text-blue-600" />
-                    <div>
-                      <div className="font-semibold text-gray-900">Ví TicketFlow</div>
-                      <div className="text-xs text-gray-600 mt-1">
-                        Thanh toán nhanh và an toàn
+          <div className="lg:col-span-1">
+            <div className="lg:sticky lg:top-24 space-y-4">
+              <Card 
+                title={
+                  <div className="flex items-center justify-between">
+                    <span>Tóm tắt đơn hàng</span>
+                    <Tag color="blue">{totalQuantity} vé</Tag>
+                  </div>
+                }
+                className="shadow-md"
+              >
+                <div className="space-y-4">
+                  {/* Event Header */}
+                  <div className="flex gap-3 pb-4 border-b">
+                    {eventInfo.eventCoverImage && (
+                      <div className="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden">
+                        <Image
+                          src={getImageUrl(eventInfo.eventCoverImage)}
+                          alt={eventInfo.eventName}
+                          fill
+                          className="object-cover"
+                          priority
+                          unoptimized={process.env.NODE_ENV === 'development'}
+                        />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-gray-900 text-sm line-clamp-2 mb-2">
+                        {eventInfo.eventName}
+                      </h3>
+                      <div className="text-xs text-gray-600 space-y-1">
+                        <div className="flex items-center gap-1">
+                          <CalendarOutlined />
+                          <span className="truncate">
+                            {dayjs(eventInfo.eventDate).format('DD/MM/YYYY HH:mm')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <EnvironmentOutlined />
+                          <span className="truncate">{eventInfo.eventVenue}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
+{/* Items List */}
+                  <div className="space-y-3">
+                    {items.map((item) => (
+                      <div key={item.ticketTypeId} className="border rounded-lg p-3 bg-gray-50">
+                        {/* Ticket Name & Price */}
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">
+                              {item.ticketTypeName}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {formatCurrency(item.price)}/vé
+                            </div>
+                          </div>
+                          <div className="font-semibold text-gray-900 ml-2">
+                            {formatCurrency(item.price * item.quantity)}
+                          </div>
+                        </div>
+                        
+                        {/* Quantity Controls */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="default"
+                              size="small"
+                              icon={<MinusOutlined />}
+                              disabled={item.quantity <= 1}
+                              onClick={() => {
+                                if (item.quantity > 1) {
+                                  updateQuantity(item.ticketTypeId, item.quantity - 1);
+                                  toast.success(`Giảm xuống ${item.quantity - 1} vé`);
+                                }
+                              }}
+                            />
+                            <span className="font-medium text-gray-900 min-w-[40px] text-center">
+                              {item.quantity}
+                            </span>
+                            <Button
+                              type="default"
+                              size="small"
+                              icon={<PlusOutlined />}
+                              onClick={() => {
+                                updateQuantity(item.ticketTypeId, item.quantity + 1);
+                                toast.success(`Tăng lên ${item.quantity + 1} vé`);
+                              }}
+                            />
+                          </div>
+                          
+                          {/* Delete Button */}
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => {
+                              removeItem(item.ticketTypeId);
+                              toast.success(`Đã xóa ${item.ticketTypeName}`);
+                              
+                              // Nếu giỏ hàng trống -> redirect về events
+                              if (items.length === 1) {
+                                setTimeout(() => {
+                                  router.push('/events');
+                                }, 1000);
+                              }
+                            }}
+                          >
+                            Xóa
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
 
-                {/* Pay Button */}
-                <Button
-                  type="primary"
-                  size="large"
-                  block
-                  icon={isLoading ? <LoadingOutlined /> : <CheckCircleOutlined />}
-                  onClick={handlePayment}
-                  disabled={isLoading}
-                  className="font-semibold text-lg h-12"
-                >
-                  {isLoading ? 'Đang xử lý...' : 'Xác nhận thanh toán'}
-                </Button>
+                  {/* Total */}
+                  <Divider className="my-4 border-t-2" />
+                  <div className="flex items-center justify-between">
+                    <span className="text-base font-semibold text-gray-900">
+                      Tổng cộng:
+                    </span>
+                    <span className="text-2xl font-bold text-red-600">
+                      {formatCurrency(totalAmount)}
+                    </span>
+                  </div>
 
-                {/* Info text */}
-                <div className="text-xs text-gray-500 text-center space-y-1">
-                  <div>Bằng việc nhấn thanh toán, bạn đồng ý với</div>
-                  <div>
+                  {/* Payment Button */}
+                  <Button
+                    type="primary"
+                    size="large"
+                    block
+                    icon={isLoading ? <LoadingOutlined /> : <CheckCircleOutlined />}
+                    onClick={handlePayment}
+                    disabled={isLoading || (paymentMethod === 'WALLET' && hasInsufficientBalance)}
+                    className="font-semibold text-base h-12 mt-6"
+                  >
+                    {isLoading ? 'Đang xử lý...' : 'Xác nhận & Thanh toán'}
+                  </Button>
+
+                  {/* Terms */}
+                  <div className="text-xs text-gray-500 text-center mt-4">
+                    Bằng việc nhấn thanh toán, bạn đồng ý với{' '}
                     <a href="/terms" className="text-blue-600 hover:underline">
                       Điều khoản dịch vụ
                     </a>
-                    {' và '}
-                    <a href="/privacy" className="text-blue-600 hover:underline">
-                      Chính sách bảo mật
-                    </a>
+                  </div>
+
+                  {/* Back Link */}
+                  <Button
+                    block
+                    onClick={handleGoBackToEvent}
+                    disabled={isLoading}
+                    className="mt-2"
+                  >
+                    Quay lại sự kiện
+                  </Button>
+                </div>
+              </Card>
+
+              {/* Trust Badges */}
+              <Card className="bg-gray-50 border-0 shadow-sm">
+                <div className="space-y-2 text-xs text-gray-600">
+                  <div className="flex items-center gap-2">
+                    <CheckCircleOutlined className="text-green-600" />
+                    <span>Thanh toán được bảo mật SSL</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircleOutlined className="text-green-600" />
+                    <span>Xác nhận vé ngay lập tức</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircleOutlined className="text-green-600" />
+                    <span>Hỗ trợ khách hàng 24/7</span>
                   </div>
                 </div>
-
-                {/* Back button */}
-                <Button
-                  block
-                  onClick={handleGoBackToEvent}
-                  disabled={isLoading}
-                >
-                  Quay lại sự kiện
-                </Button>
-              </div>
-            </Card>
-
-            {/* Trust Badges */}
-            <Card className="bg-gray-50 border-0 shadow-sm">
-              <div className="space-y-2 text-xs text-gray-600">
-                <div className="flex items-center gap-2">
-                  <CheckCircleOutlined className="text-green-600" />
-                  <span>Thanh toán được mã hóa SSL</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircleOutlined className="text-green-600" />
-                  <span>Xác nhận ngay lập tức</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircleOutlined className="text-green-600" />
-                  <span>Hỗ trợ 24/7</span>
-                </div>
-              </div>
-            </Card>
+              </Card>
+            </div>
           </div>
         </div>
       </div>
