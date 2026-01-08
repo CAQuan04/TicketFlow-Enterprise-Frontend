@@ -61,7 +61,13 @@ export default function LoginPage() {
   // Auto-redirect if already logged in
   useEffect(() => {
     if (isAuthenticated) {
-      router.replace('/');
+      const user = useAuthStore.getState().user;
+      // Redirect based on role
+      if (user?.role === 'Admin' || user?.role === 'Organizer') {
+        router.replace('/admin/dashboard');
+      } else {
+        router.replace('/');
+      }
     }
   }, [isAuthenticated, router]);
 
@@ -96,9 +102,13 @@ export default function LoginPage() {
       const user = useAuthStore.getState().user;
       toast.success(`Chào mừng trở lại, ${user?.fullName || 'bạn'}!`);
 
-      // Small delay to ensure state update completes
+      // Redirect based on role
       setTimeout(() => {
-        router.replace('/');
+        if (user?.role === 'Admin' || user?.role === 'Organizer') {
+          router.replace('/admin/dashboard');
+        } else {
+          router.replace('/');
+        }
       }, 100);
     } catch (error: any) {
       // Handle Backend errors

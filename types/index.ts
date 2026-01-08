@@ -18,6 +18,9 @@ export * from './dtos/order.types';
 // Ticket Types
 export * from './dtos/ticket.types';
 
+// Stats & Analytics Types
+export * from './dtos/stats.types';
+
 // Common API Response Types
 export interface ApiResponse<T = any> {
   success: boolean;

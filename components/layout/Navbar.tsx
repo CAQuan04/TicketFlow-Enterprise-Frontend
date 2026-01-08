@@ -265,18 +265,18 @@ export function Navbar() {
         </Link>
       ),
     },
-    // Show Dashboard only for Admin/Organizer
+    // Show Admin Portal only for Admin/Organizer
     ...(user?.role === 'Admin' || user?.role === 'Organizer'
       ? [
           {
             type: 'divider' as const,
           },
           {
-            key: 'dashboard',
+            key: 'admin',
             label: (
-              <Link href="/dashboard" className="flex items-center gap-2">
+              <Link href="/admin/dashboard" className="flex items-center gap-2 text-blue-600 font-medium">
                 <LayoutDashboard className="h-4 w-4" />
-                Dashboard
+                Admin Portal
               </Link>
             ),
           },
@@ -372,10 +372,17 @@ export function Navbar() {
                     {user.fullName?.charAt(0).toUpperCase() || 'U'}
                   </div>
                   
-                  {/* Name (hidden on mobile) */}
-                  <span className="hidden font-medium text-gray-900 md:block">
-                    {user.fullName || 'User'}
-                  </span>
+                  {/* Name + Role */}
+                  <div className="hidden md:block text-left">
+                    <div className="font-medium text-gray-900 text-sm leading-tight">
+                      {user.fullName || 'User'}
+                    </div>
+                    <div className="text-xs text-gray-500 leading-tight mt-0.5">
+                      {user.role === 'Admin' && 'Quản trị viên'}
+                      {user.role === 'Organizer' && 'Nhà tổ chức'}
+                      {user.role === 'Customer' && 'Khách hàng'}
+                    </div>
+                  </div>
                 </button>
               </Dropdown>
             ) : (

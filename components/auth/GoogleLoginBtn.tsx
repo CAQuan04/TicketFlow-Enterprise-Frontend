@@ -232,8 +232,12 @@ export function GoogleLoginBtn({
         onSuccess();
       }
 
-      // Redirect to home
-      router.push('/');
+      // Redirect based on role
+      if (user?.role === 'Admin' || user?.role === 'Organizer') {
+        router.push('/admin/dashboard');
+      } else {
+        router.push('/');
+      }
     } catch (error: unknown) {
       console.error('❌ Google Login Error:', error);
 

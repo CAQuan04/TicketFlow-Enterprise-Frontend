@@ -6,6 +6,7 @@
 export * from './auth.service';
 export * from './event.service';
 export * from './order.service';
+export * from './stats.service';
 
 // Export named services
 export { ticketService } from './ticket.service';
